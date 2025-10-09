@@ -63,27 +63,33 @@ export default function Step2Page() {
   const [ignoredEmployees, setIgnoredEmployees] = useState<Set<string>>(
     new Set()
   );
-   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
-    const calculateMonthlyDifferences = (): { canProceed: boolean; monthlyStats: Record<string, { totalDiff: number; employeeCount: number }> } => {
+  const calculateMonthlyDifferences = (): {
+    canProceed: boolean;
+    monthlyStats: Record<string, { totalDiff: number; employeeCount: number }>;
+  } => {
     if (!comparisonResults) return { canProceed: true, monthlyStats: {} };
-    
+
     const months = generateMonthHeaders();
-    const monthlyStats: Record<string, { totalDiff: number; employeeCount: number }> = {};
+    const monthlyStats: Record<
+      string,
+      { totalDiff: number; employeeCount: number }
+    > = {};
     let canProceed = true;
 
-    months.forEach(month => {
+    months.forEach((month) => {
       let totalDiff = 0;
       let employeeCount = 0;
 
       // Calculate for staff
-      comparisonResults.staffComparisons.forEach(emp => {
+      comparisonResults.staffComparisons.forEach((emp) => {
         const actualSal = emp.actualSalaries[month] || 0;
         const hrSal = emp.hrSalaries[month] || 0;
         const diff = Math.abs(actualSal - hrSal);
-        
+
         if (actualSal > 0 || hrSal > 0) {
           employeeCount++;
           totalDiff += diff;
@@ -91,11 +97,11 @@ export default function Step2Page() {
       });
 
       // Calculate for workers
-      comparisonResults.workerComparisons.forEach(emp => {
+      comparisonResults.workerComparisons.forEach((emp) => {
         const actualSal = emp.actualSalaries[month] || 0;
         const hrSal = emp.hrSalaries[month] || 0;
         const diff = Math.abs(actualSal - hrSal);
-        
+
         if (actualSal > 0 || hrSal > 0) {
           employeeCount++;
           totalDiff += diff;
@@ -103,7 +109,7 @@ export default function Step2Page() {
       });
 
       monthlyStats[month] = { totalDiff, employeeCount };
-      
+
       // Check if difference exceeds employee count
       if (totalDiff > employeeCount) {
         canProceed = false;
@@ -115,7 +121,7 @@ export default function Step2Page() {
 
   const handleMoveToStep3 = () => {
     const { canProceed } = calculateMonthlyDifferences();
-    
+
     if (canProceed) {
       // Direct navigation to Step 3
       router.push("/step3");
@@ -129,7 +135,7 @@ export default function Step2Page() {
 
   const handlePasswordSubmit = () => {
     const expectedPassword = process.env.NEXT_PUBLIC_NEXT_PASSWORD;
-    
+
     if (password === expectedPassword) {
       setShowPasswordModal(false);
       router.push("/step3");
@@ -1592,81 +1598,82 @@ export default function Step2Page() {
   };
 
   const compareEmployees = (
-    actualByKey: Record<string, EmployeeMonthlySalary>,
-    hrByKey: Record<string, EmployeeMonthlySalary>,
-    months: string[]
-  ): EmployeeComparison[] => {
-    const allKeys = new Set([
-      ...Object.keys(actualByKey),
-      ...Object.keys(hrByKey),
-    ]);
-    const out: EmployeeComparison[] = [];
+  actualByKey: Record<string, EmployeeMonthlySalary>,
+  hrByKey: Record<string, EmployeeMonthlySalary>,
+  months: string[]
+): EmployeeComparison[] => {
+  const allKeys = new Set([...Object.keys(actualByKey), ...Object.keys(hrByKey)]);
+  const out: EmployeeComparison[] = [];
 
-    for (const key of allKeys) {
-      const a = actualByKey[key];
-      const h = hrByKey[key];
+  for (const key of allKeys) {
+    const a = actualByKey[key];
+    const h = hrByKey[key];
 
-      const name = (a?.name || h?.name || "").toUpperCase();
-      const code = a?.employeeCode || h?.employeeCode || "";
-      const dept = a?.department || h?.department || "";
+    const name = (a?.name || h?.name || "").toUpperCase();
+    const code = a?.employeeCode || h?.employeeCode || "";
+    const dept = a?.department || h?.department || "";
 
-      const actualSalaries: Record<string, number> = {};
-      const hrSalaries: Record<string, number> = {};
-      const monthsWithMismatch: string[] = [];
-      let hasMismatch = false;
+    const actualSalaries: Record<string, number> = {};
+    const hrSalaries: Record<string, number> = {};
+    const monthsWithMismatch: string[] = [];
+    let hasMismatch = false;
 
-      for (const m of months) {
-        const av = a?.monthlySalaries[m] || 0;
-        const hv = h?.monthlySalaries[m] || 0;
-        actualSalaries[m] = av;
-        hrSalaries[m] = hv;
+    for (const m of months) {
+      let av = a?.monthlySalaries[m] || 0;
+      const hv = h?.monthlySalaries[m] || 0;
 
-        // Check department for this specific month
-        const monthDept = a?.monthlyDepartments?.[m] || dept;
-        const shouldIgnoreMonth =
-          ["C", "A"].includes(monthDept.toUpperCase()) ||
-          code.toUpperCase() === "N";
-
-        // Only flag as mismatch if not in C/A department for this month
-        if (Math.abs(av - hv) > 1 && !shouldIgnoreMonth) {
-          hasMismatch = true;
-          monthsWithMismatch.push(m);
-        }
+      // Get department for this specific month
+      const monthDept = (a?.monthlyDepartments?.[m] || dept).toUpperCase();
+      
+      // If department is C for this month, treat salary1 as null (0)
+      if (monthDept === "C") {
+        av = 0; // Ignore the actual salary1 value
       }
 
-      const totalActual = Object.values(actualSalaries).reduce(
-        (s, v) => s + v,
-        0
-      );
-      const totalHR = Object.values(hrSalaries).reduce((s, v) => s + v, 0);
+      actualSalaries[m] = av;
+      hrSalaries[m] = hv;
 
-      out.push({
-        name,
-        employeeCode: code,
-        department: dept,
-        actualSalaries,
-        hrSalaries,
-        hasMismatch,
-        missingInHR: !h,
-        missingInActual: !a,
-        totalActual,
-        totalHR,
-        totalDifference: totalActual - totalHR,
-        monthsWithMismatch,
-        monthlyDepartments: a?.monthlyDepartments, // Pass monthly departments
-      });
+      // Check if this month should be ignored for mismatch detection
+      const shouldIgnoreMonth =
+        ["C", "A"].includes(monthDept) || code.toUpperCase() === "N";
+
+      // Only flag as mismatch if not in C/A department and not employee N
+      if (Math.abs(av - hv) > 1 && !shouldIgnoreMonth) {
+        hasMismatch = true;
+        monthsWithMismatch.push(m);
+      }
     }
 
-    out.sort((x, y) => {
-      if (x.missingInHR !== y.missingInHR) return x.missingInHR ? -1 : 1;
-      if (x.missingInActual !== y.missingInActual)
-        return x.missingInActual ? -1 : 1;
-      if (x.hasMismatch !== y.hasMismatch) return x.hasMismatch ? -1 : 1;
-      return 0;
-    });
+    const totalActual = Object.values(actualSalaries).reduce((s, v) => s + v, 0);
+    const totalHR = Object.values(hrSalaries).reduce((s, v) => s + v, 0);
 
-    return out;
-  };
+    out.push({
+      name,
+      employeeCode: code,
+      department: dept,
+      actualSalaries,
+      hrSalaries,
+      hasMismatch,
+      missingInHR: !h,
+      missingInActual: !a,
+      totalActual,
+      totalHR,
+      totalDifference: totalActual - totalHR,
+      monthsWithMismatch,
+      monthlyDepartments: a?.monthlyDepartments,
+    });
+  }
+
+  out.sort((x, y) => {
+    if (x.missingInHR !== y.missingInHR) return x.missingInHR ? -1 : 1;
+    if (x.missingInActual !== y.missingInActual) return x.missingInActual ? -1 : 1;
+    if (x.hasMismatch !== y.hasMismatch) return x.hasMismatch ? -1 : 1;
+    return 0;
+  });
+
+  return out;
+};
+
 
   const runSalaryComparison = async () => {
     if (!staffFile || !workerFile || !bonusFile) {
@@ -1719,8 +1726,105 @@ export default function Step2Page() {
         workerWb,
         workerSheetNames
       );
+      const calculateOctoberAverageForActualEmployees = (
+        employees: Record<string, EmployeeMonthlySalary>
+      ) => {
+        const monthsToAverage = [
+          "Nov-24",
+          "Dec-24",
+          "Jan-25",
+          "Feb-25",
+          "Mar-25",
+          "Apr-25",
+          "May-25",
+          "Jun-25",
+          "Jul-25",
+          "Aug-25",
+          "Sep-25",
+        ];
+
+        for (const key in employees) {
+          const emp = employees[key];
+          const values: number[] = [];
+
+          // Collect all salary values from Nov-24 to Sep-25
+          for (const month of monthsToAverage) {
+            const salary = emp.monthlySalaries[month] || 0;
+
+            // Get department for this specific month
+            const monthDept = emp.monthlyDepartments?.[month] || emp.department;
+
+            // Ignore salary1 if department is C for this month
+            if (monthDept.toUpperCase() === "C") {
+              continue; // Skip this month's salary
+            }
+
+            if (salary > 0) {
+              values.push(salary);
+            }
+          }
+
+          // Calculate average and assign to October
+          if (values.length > 0) {
+            const average =
+              values.reduce((sum, val) => sum + val, 0) / values.length;
+            emp.monthlySalaries["Oct-25"] = Math.round(average);
+          } else {
+            // If all months were ignored (all dept C), set October to 0
+            emp.monthlySalaries["Oct-25"] = 0;
+          }
+        }
+      };
+
+      // Apply October calculation to both staff and worker actual data
+      calculateOctoberAverageForActualEmployees(staffEmployees);
+      calculateOctoberAverageForActualEmployees(workerEmployees);
+
       const hrStaffEmployees = extractHREmployees(bonusWb, "Staff");
       const hrWorkerEmployees = extractHREmployees(bonusWb, "Worker");
+
+      // ✅ NEW: Calculate October average for HR employees (Nov-24 to Sep-25)
+      const calculateOctoberAverageForHREmployees = (
+        employees: Record<string, EmployeeMonthlySalary>
+      ) => {
+        const monthsToAverage = [
+          "Nov-24",
+          "Dec-24",
+          "Jan-25",
+          "Feb-25",
+          "Mar-25",
+          "Apr-25",
+          "May-25",
+          "Jun-25",
+          "Jul-25",
+          "Aug-25",
+          "Sep-25",
+        ];
+
+        for (const key in employees) {
+          const emp = employees[key];
+          const values: number[] = [];
+
+          // Collect all salary values from Nov-24 to Sep-25
+          for (const month of monthsToAverage) {
+            const salary = emp.monthlySalaries[month] || 0;
+            if (salary > 0) {
+              values.push(salary);
+            }
+          }
+
+          // Calculate average and assign to October
+          if (values.length > 0) {
+            const average =
+              values.reduce((sum, val) => sum + val, 0) / values.length;
+            emp.monthlySalaries["Oct-25"] = Math.round(average);
+          }
+        }
+      };
+
+      // Apply October calculation to both staff and worker HR data
+      calculateOctoberAverageForHREmployees(hrStaffEmployees);
+      calculateOctoberAverageForHREmployees(hrWorkerEmployees);
 
       console.log(`Staff employees: ${Object.keys(staffEmployees).length}`);
       console.log(`Worker employees: ${Object.keys(workerEmployees).length}`);
@@ -2699,8 +2803,18 @@ export default function Step2Page() {
                 onClick={handleMoveToStep3}
                 className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                  />
                 </svg>
                 Move to Step 3
               </button>
@@ -3328,29 +3442,42 @@ export default function Step2Page() {
         </div>
       </div>
       {showPasswordModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-800">Password Required</h3>
+              <h3 className="text-xl font-bold text-gray-800">
+                Password Required
+              </h3>
               <button
                 onClick={handleModalClose}
                 className="text-gray-400 hover:text-gray-600"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
-            
+
             <div className="mb-4">
               <p className="text-gray-600 mb-4">
-                The total differences exceed the number of employees for some months. Please enter the password to proceed to Step 3.
+                The total differences exceed the number of employees for some
+                months. Please enter the password to proceed to Step 3.
               </p>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                onKeyPress={(e) => e.key === "Enter" && handlePasswordSubmit()}
                 placeholder="Enter password"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 autoFocus
@@ -3359,7 +3486,7 @@ export default function Step2Page() {
                 <p className="text-red-600 text-sm mt-2">{passwordError}</p>
               )}
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={handleModalClose}

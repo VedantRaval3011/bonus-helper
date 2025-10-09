@@ -44,7 +44,7 @@ export default function Step3Page() {
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
-  // NEW: month parsing + constants
+  // Month parsing constants
   const MONTH_NAME_MAP: Record<string, number> = {
     JAN: 1,
     JANUARY: 1,
@@ -74,53 +74,60 @@ export default function Step3Page() {
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
-  // Try to parse "YYYY-MM" from a sheet name like "Nov-24", "November 2024", "2025-09", etc.
+  // Parse "YYYY-MM" from sheet name
   const parseMonthFromSheetName = (sheetName: string): string | null => {
     const s = String(sheetName || "").trim().toUpperCase();
-
-    // Case 1: YYYY[-/_ ]MM
+    
+    // Case 1: YYYY-MM format
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
       const m = Number(yyyymm[2]);
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
-
-    // Case 2: MON or MONTH with 2/4 digit year nearby
+    
+    // Case 2: Month name with year
     const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
     );
     const y2or4 = s.match(/\b(20\d{2}|\d{2})\b/);
-
     const monthToken = (monthFull?.[1] || mon?.[1]) as string | undefined;
+    
     if (monthToken && y2or4) {
       let y = Number(y2or4[1]);
-      if (y < 100) y += 2000; // assume 20xx for 2-digit years
+      if (y < 100) y += 2000;
       const m = MONTH_NAME_MAP[monthToken];
       if (m) return `${y}-${pad2(m)}`;
     }
-
+    
     return null;
   };
 
-  // Months to average for October 2025 estimate
+  // Months for averaging (Nov-24 to Sep-25)
   const AVG_WINDOW: string[] = [
-    "2024-11",
-    "2024-12",
-    "2025-01",
-    "2025-02",
-    "2025-03",
-    "2025-04",
-    "2025-05",
-    "2025-06",
-    "2025-07",
-    "2025-08",
-    "2025-09",
+    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
+    "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
   ];
 
-  // Tolerance threshold for matching
+  // Months to EXCLUDE from any calculation
+  const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
+
+  // *** DEPARTMENTS TO EXCLUDE FROM WORKER SALARY CALCULATION ***
+  const EXCLUDED_DEPARTMENTS = ["C", "CASH", "A"];
+
   const TOLERANCE = 12;
+
+  // *** HARDCODED EXCLUDE LIST - Employees from Average sheet ***
+  // These employees will NOT get October estimate
+  const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
+    937,   // DAKSH VYAS
+    1039,  // GAUTAM CHACHIYA
+    1065,  // PRAVIN SABARIYA
+    1105,  // RAMJI PARMAR
+    59,    // DHAVAL MARU
+    161,   // MAYUR DABHI
+  ]);
 
   const processFiles = async () => {
     if (!staffFile || !workerFile || !bonusFile) {
@@ -132,24 +139,38 @@ export default function Step3Page() {
     setError(null);
 
     try {
-      // Read Staff file
+      console.log("=" .repeat(60));
+      console.log("🚫 OCTOBER EXCLUDE LIST (from Average sheet):");
+      console.log(Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
+      console.log("🚫 EXCLUDED DEPARTMENTS (Worker): C (Cash), A");
+      console.log("=" .repeat(60));
+
+      // ========== PROCESS STAFF FILE ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
-
-      // REPLACE the staffEmployees declaration with months map
+      
       const staffEmployees: Map<
         number,
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      // Process Staff sheets - sum SALARY1 column per month
       for (let sheetName of staffWorkbook.SheetNames) {
+        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+        
+        if (EXCLUDED_MONTHS.includes(monthKey)) {
+          console.log(`🚫 SKIP Staff: ${sheetName} (${monthKey}) - EXCLUDED`);
+          continue;
+        }
+        
+        if (!AVG_WINDOW.includes(monthKey)) {
+          console.log(`⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          continue;
+        }
+
+        console.log(`✅ Processing Staff: ${sheetName} -> ${monthKey}`);
+        
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-        // Inside the Staff sheet loop, right after you compute headers and indices:
-        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        console.log(`Staff sheet: ${sheetName} -> monthKey: ${monthKey}`);
 
         let headerIdx = -1;
         for (let i = 0; i < Math.min(15, data.length); i++) {
@@ -164,17 +185,16 @@ export default function Step3Page() {
             break;
           }
         }
+
         if (headerIdx === -1) continue;
 
         const headers = data[headerIdx];
         const empIdIdx = headers.findIndex((h: any) =>
           ["EMPID", "EMPCODE"].includes(norm(h))
         );
-
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-
         const salary1Idx = headers.findIndex(
           (h: any) =>
             /^\s*SALARY\s*-?\s*1\s*$/i.test(String(h ?? "")) ||
@@ -182,13 +202,10 @@ export default function Step3Page() {
         );
 
         if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
-          console.log(
-            `Skipping staff sheet ${sheetName}: missing required columns`
-          );
+          console.log(`⚠️ Skip Staff ${sheetName}: missing columns`);
           continue;
         }
 
-        // REPLACE the row accumulation block inside Staff loop:
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
           if (!row || row.length === 0) continue;
@@ -196,6 +213,7 @@ export default function Step3Page() {
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
+
           if (!empId || isNaN(empId) || !empName) continue;
 
           if (!staffEmployees.has(empId)) {
@@ -205,32 +223,41 @@ export default function Step3Page() {
               months: new Map(),
             });
           }
+
           const emp = staffEmployees.get(empId)!;
           emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
         }
       }
 
-      // Read Worker file
+      console.log(`✅ Staff employees: ${staffEmployees.size}`);
+
+      // ========== PROCESS WORKER FILE ==========
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
-
-      // REPLACE the workerEmployees declaration with months map
+      
       const workerEmployees: Map<
         number,
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      // Process Worker sheets - sum Salary1 column (column I, index 8) per month
       for (let sheetName of workerWorkbook.SheetNames) {
-        console.log(`Processing worker sheet: ${sheetName}`);
+        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+        
+        if (EXCLUDED_MONTHS.includes(monthKey)) {
+          console.log(`🚫 SKIP Worker: ${sheetName} (${monthKey}) - EXCLUDED`);
+          continue;
+        }
+        
+        if (!AVG_WINDOW.includes(monthKey)) {
+          console.log(`⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          continue;
+        }
+
+        console.log(`✅ Processing Worker: ${sheetName} -> ${monthKey}`);
+        
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-        // Inside the Worker sheet loop, after headers are prepared:
-        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        console.log(`Worker sheet: ${sheetName} -> monthKey: ${monthKey}`);
-
-        // Find header row
         let headerIdx = -1;
         for (let i = 0; i < Math.min(5, data.length); i++) {
           if (data[i] && data[i].some((v: any) => norm(v) === "EMPID")) {
@@ -240,40 +267,38 @@ export default function Step3Page() {
         }
 
         if (headerIdx === -1) {
-          console.log(`Sheet ${sheetName}: Cannot find header row`);
+          console.log(`⚠️ Worker ${sheetName}: No header`);
           continue;
         }
 
         const headers = data[headerIdx];
-
-        // Find Employee ID column
         const empIdIdx = headers.findIndex((h: any) =>
           ["EMPID", "EMPCODE"].includes(norm(h))
         );
-
-        // Find Employee Name column
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-
-        // SALARY1 is at column I (index 8 - 0-based indexing) for workers
+        
+        // *** FIND DEPARTMENT COLUMN ***
+        const deptIdx = headers.findIndex((h: any) => {
+          const normalized = norm(h);
+          return normalized === "DEPT" || normalized === "DEPARTMENT" || normalized === "DEPTT";
+        });
+        
         const salary1Idx = 8; // Column I
 
-        // Log the column header at this position for verification
-        if (headers[salary1Idx]) {
-          console.log(
-            `Worker sheet ${sheetName}: Column I header is "${headers[salary1Idx]}"`
-          );
-        }
-
         if (empIdIdx === -1 || empNameIdx === -1) {
-          console.log(
-            `Skipping worker sheet ${sheetName}: missing EmpId or Name columns`
-          );
+          console.log(`⚠️ Skip Worker ${sheetName}: missing columns`);
           continue;
         }
 
-        // REPLACE the row accumulation block inside Worker loop:
+        if (deptIdx === -1) {
+          console.log(`⚠️ Warning: Department column not found in ${sheetName}. Cannot filter departments.`);
+        }
+
+        let excludedDeptCount = 0;
+        const excludedDeptBreakdown: Record<string, number> = {};
+
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
           if (!row || row.length === 0) continue;
@@ -281,6 +306,19 @@ export default function Step3Page() {
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
+
+          // *** FILTER OUT EXCLUDED DEPARTMENTS: C (Cash) and A ***
+          if (deptIdx !== -1) {
+            const dept = String(row[deptIdx] || "").trim().toUpperCase();
+            
+            if (EXCLUDED_DEPARTMENTS.includes(dept)) {
+              excludedDeptCount++;
+              excludedDeptBreakdown[dept] = (excludedDeptBreakdown[dept] || 0) + 1;
+              console.log(`🚫 EXCLUDED: Emp ${empId} (${empName}) - Dept: ${dept}`);
+              continue;
+            }
+          }
+
           if (!empId || isNaN(empId) || !empName) continue;
 
           if (!workerEmployees.has(empId)) {
@@ -290,31 +328,37 @@ export default function Step3Page() {
               months: new Map(),
             });
           }
+
           const emp = workerEmployees.get(empId)!;
           emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
         }
+
+        if (excludedDeptCount > 0) {
+          const breakdown = Object.entries(excludedDeptBreakdown)
+            .map(([dept, count]) => `${dept}=${count}`)
+            .join(", ");
+          console.log(`💰 Filtered ${excludedDeptCount} workers from ${sheetName} (${breakdown})`);
+        }
       }
 
-      console.log(`Total worker employees processed: ${workerEmployees.size}`);
+      console.log(`✅ Worker employees: ${workerEmployees.size}`);
 
-      // Read Bonus file
+      // ========== PROCESS BONUS FILE ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
+      
       const bonusEmployees: Map<
         number,
         { name: string; grossSalary: number; dept: string }
       > = new Map();
 
-      // Process ALL sheets in the bonus workbook
       for (let sheetName of bonusWorkbook.SheetNames) {
-        console.log(`Processing bonus sheet: ${sheetName}`);
-
+        console.log(`📊 Processing bonus: ${sheetName}`);
         const bonusSheet = bonusWorkbook.Sheets[sheetName];
         const bonusData: any[][] = XLSX.utils.sheet_to_json(bonusSheet, {
           header: 1,
         });
 
-        // Detect header row for HR bonus sheet
         let bonusHeaderRow = -1;
         for (let i = 0; i < Math.min(8, bonusData.length); i++) {
           if (
@@ -328,7 +372,7 @@ export default function Step3Page() {
         }
 
         if (bonusHeaderRow === -1) {
-          console.log(`Skipping sheet ${sheetName}: Cannot locate header row`);
+          console.log(`⚠️ Skip bonus ${sheetName}: No header`);
           continue;
         }
 
@@ -336,8 +380,6 @@ export default function Step3Page() {
         const empCodeIdx = headers.indexOf("EMP Code");
         const empNameIdx = headers.indexOf("EMP. NAME");
         const deptIdx = headers.indexOf("Deptt.");
-
-        // Find the Gross column - it could be "GROSS", "Gross", or "GROSS SAL."
         const grossIdx = headers.findIndex(
           (h: any) =>
             typeof h === "string" &&
@@ -345,17 +387,10 @@ export default function Step3Page() {
         );
 
         if (grossIdx === -1) {
-          console.log(
-            `Sheet ${sheetName}: Cannot locate Gross/GROSS SAL. column, skipping`
-          );
+          console.log(`⚠️ Skip bonus ${sheetName}: No Gross column`);
           continue;
         }
 
-        console.log(
-          `Sheet ${sheetName}: Found columns - EmpCode:${empCodeIdx}, Name:${empNameIdx}, Dept:${deptIdx}, Gross:${grossIdx}`
-        );
-
-        // Process rows in this sheet
         for (let i = bonusHeaderRow + 1; i < bonusData.length; i++) {
           const row = bonusData[i];
           if (!row || row.length === 0) continue;
@@ -365,20 +400,13 @@ export default function Step3Page() {
           const dept = String(row[deptIdx] || "").trim().toUpperCase();
           const gross = Number(row[grossIdx]) || 0;
 
-          // Skip invalid rows
           if (!empId || isNaN(empId) || !empName || isNaN(gross)) continue;
 
-          // Map department: W = Worker, M/S = Staff
           const deptType =
-            dept === "W"
-              ? "Worker"
-              : dept === "M" || dept === "S"
-              ? "Staff"
-              : "Unknown";
+            dept === "W" ? "Worker" : dept === "M" || dept === "S" ? "Staff" : "Unknown";
 
           if (bonusEmployees.has(empId)) {
-            const existing = bonusEmployees.get(empId)!;
-            existing.grossSalary += gross;
+            bonusEmployees.get(empId)!.grossSalary += gross;
           } else {
             bonusEmployees.set(empId, {
               name: empName,
@@ -387,19 +415,16 @@ export default function Step3Page() {
             });
           }
         }
-
-        console.log(
-          `Sheet ${sheetName}: Processed ${bonusEmployees.size} total employees so far`
-        );
       }
 
-      // NEW: fold Staff and Worker monthly maps into software totals with Oct-2025 estimate
+      console.log(`✅ Bonus employees: ${bonusEmployees.size}`);
+
+      // ========== COMPUTE SOFTWARE TOTALS ==========
       const softwareEmployeesTotals: Map<
         number,
         { name: string; dept: string; grossSalary: number }
       > = new Map();
 
-      // Helper to fold one map into totals
       const foldMonthly = (
         src: Map<
           number,
@@ -407,39 +432,45 @@ export default function Step3Page() {
         >
       ) => {
         for (const [empId, rec] of src) {
-          // sum all known months
           let baseSum = 0;
-          for (const v of rec.months.values()) baseSum += Number(v) || 0;
-
-          // NEW CONDITION: Only calculate October 2025 estimate if September 2025 data exists
-          let estOct = 0;
-          const hasSep2025 = rec.months.has("2025-09");
+          const monthsIncluded: { month: string; value: number }[] = [];
           
-          if (hasSep2025) {
-            // compute mean across window months that exist for this employee
-            const values: number[] = [];
-            for (const mk of AVG_WINDOW) {
-              const v = rec.months.get(mk);
-              if (v != null && !isNaN(Number(v))) values.push(Number(v));
+          for (const mk of AVG_WINDOW) {
+            const v = rec.months.get(mk);
+            if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
+              baseSum += Number(v);
+              monthsIncluded.push({ month: mk, value: Number(v) });
             }
-            estOct = values.length
-              ? values.reduce((a, b) => a + b, 0) / values.length
-              : 0;
+          }
+
+          let estOct = 0;
+          let total = baseSum;
+          const hasSep2025 = rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
+          const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
+
+          if (isExcluded) {
+            // Employee in exclude list - NO October estimate
+            console.log(
+              `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
+            );
+          } else if (hasSep2025 && monthsIncluded.length > 0) {
+            // Normal employee with Sep-25 data - calculate October
+            const values = monthsIncluded.map(m => m.value);
+            estOct = values.reduce((a, b) => a + b, 0) / values.length;
+            total = baseSum + estOct;
 
             console.log(
-              `Employee ${empId} (${rec.name}): Has Sep 2025 data, Base sum = ${baseSum}, Oct estimate = ${estOct}, Total = ${
-                baseSum + estOct
-              }`
+              `💰 EMP ${empId} (${rec.name}):\n` +
+              `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
+              `   Oct Estimate: ₹${estOct.toFixed(2)}\n` +
+              `   TOTAL: ₹${total.toFixed(2)}`
             );
           } else {
             console.log(
-              `Employee ${empId} (${rec.name}): Missing Sep 2025 data, skipping Oct estimate, Total = ${baseSum}`
+              `⚠️ EMP ${empId} (${rec.name}): No Sep-25 data - Base only = ₹${baseSum.toFixed(2)}`
             );
           }
 
-          const total = baseSum + estOct;
-
-          // write / merge into totals map
           const prev = softwareEmployeesTotals.get(empId);
           if (!prev) {
             softwareEmployeesTotals.set(empId, {
@@ -448,9 +479,7 @@ export default function Step3Page() {
               grossSalary: total,
             });
           } else {
-            // In case the same EmpID appears in both maps, add up (rare)
             prev.grossSalary += total;
-            // Prefer Staff over Worker name/department if needed
             if (prev.dept !== "Staff" && rec.dept === "Staff") {
               prev.name = rec.name;
               prev.dept = rec.dept;
@@ -459,21 +488,15 @@ export default function Step3Page() {
         }
       };
 
-      // Fold Staff and Worker into totals
       foldMonthly(staffEmployees);
       foldMonthly(workerEmployees);
 
-      // Use software totals (with Oct-2025 estimate where applicable)
-      const allEmployees = softwareEmployeesTotals;
-
-      // Build comparison using software totals (with Oct-2025 estimate)
+      // ========== BUILD COMPARISON ==========
       const comparison: any[] = [];
-      for (const [empId, empData] of allEmployees) {
+      
+      for (const [empId, empData] of softwareEmployeesTotals) {
         const b = bonusEmployees.get(empId);
-
         const difference = empData.grossSalary - (b?.grossSalary || 0);
-        
-        // NEW: Use tolerance of ±12 for matching
         const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
         comparison.push({
@@ -490,6 +513,7 @@ export default function Step3Page() {
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
+
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -505,7 +529,6 @@ export default function Step3Page() {
     // eslint-disable-next-line
   }, [staffFile, workerFile, bonusFile]);
 
-  // Apply department filter
   useEffect(() => {
     if (departmentFilter === "All") {
       setFilteredData(comparisonData);
@@ -527,6 +550,7 @@ export default function Step3Page() {
   const exportToExcel = () => {
     const dataToExport =
       departmentFilter === "All" ? comparisonData : filteredData;
+    
     const ws = XLSX.utils.json_to_sheet(
       dataToExport.map((row) => ({
         "Employee ID": row.employeeId,
@@ -538,6 +562,7 @@ export default function Step3Page() {
         Status: row.status,
       }))
     );
+    
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Gross Salary Comparison");
     XLSX.writeFile(
@@ -574,7 +599,6 @@ export default function Step3Page() {
               </span>
             </div>
           </div>
-
           <div className="flex items-center gap-2 text-xs text-green-700 bg-green-100 px-3 py-2 rounded">
             <svg
               className="w-4 h-4"
@@ -589,7 +613,7 @@ export default function Step3Page() {
                 d="M5 13l4 4L19 7"
               />
             </svg>
-            File is ready for processing
+            File is ready
           </div>
         </div>
       ) : (
@@ -611,7 +635,7 @@ export default function Step3Page() {
             <span className="font-medium">File not found</span>
           </div>
           <p className="text-xs text-gray-500">
-            This file was not uploaded in the previous steps
+            Upload in Step 1
           </p>
         </div>
       )}
@@ -622,14 +646,13 @@ export default function Step3Page() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-5 px-4">
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
-          {/* Header */}
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-3xl font-bold text-gray-800">
                 Step 3 - Gross Salary Comparison
               </h1>
               <p className="text-gray-600 mt-2">
-                Compare gross salaries between Software and HR data (Oct 2025 estimated only if Sep 2025 exists, ±12 tolerance)
+                Nov-24 to Sep-25 + Oct-25 avg (excludes Dept A & C, EmpIDs: 937, 1039, 1065, 1105, 59, 161)
               </p>
             </div>
             <div className="flex gap-3">
@@ -648,73 +671,27 @@ export default function Step3Page() {
             </div>
           </div>
 
-          {/* File Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
               file={staffFile}
-              description="Staff salary data file"
-              icon={
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                  />
-                </svg>
-              }
+              description="Staff salary data"
+              icon={<></>}
             />
-
             <FileCard
               title="Indiana Worker"
               file={workerFile}
-              description="Worker salary data file"
-              icon={
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                  />
-                </svg>
-              }
+              description="Worker salary data (Dept A & C excluded)"
+              icon={<></>}
             />
-
             <FileCard
               title="Bonus Sheet"
               file={bonusFile}
-              description="Bonus calculation data"
-              icon={
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
-                  />
-                </svg>
-              }
+              description="Bonus calculation"
+              icon={<></>}
             />
           </div>
 
-          {/* Missing Files Alert */}
           {[staffFile, workerFile, bonusFile].filter(Boolean).length < 3 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -736,27 +713,24 @@ export default function Step3Page() {
                     Some files are missing
                   </h3>
                   <p className="text-sm text-yellow-600 mt-1">
-                    Please upload all required files in Step 1 to proceed with
-                    full processing capabilities.
+                    Please upload all required files in Step 1
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Processing Status */}
           {isProcessing && (
             <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing files and calculating gross salaries (Oct 2025 estimated only if Sep 2025 exists)...
+                  Processing (excluding Dept A & C, 6 employees from Oct estimate)...
                 </p>
               </div>
             </div>
           )}
 
-          {/* Error Message */}
           {error && (
             <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -778,16 +752,13 @@ export default function Step3Page() {
             </div>
           )}
 
-          {/* Comparison Table */}
           {comparisonData.length > 0 && (
             <div className="mt-8">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-bold text-gray-800">
-                    Gross Salary Comparison Results
+                    Comparison Results
                   </h2>
-
-                  {/* Department Filter */}
                   <select
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -798,7 +769,6 @@ export default function Step3Page() {
                     <option value="Worker">Worker Only</option>
                   </select>
                 </div>
-
                 <button
                   onClick={exportToExcel}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
@@ -816,7 +786,7 @@ export default function Step3Page() {
                       d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                     />
                   </svg>
-                  Export to Excel
+                  Export
                 </button>
               </div>
 
@@ -834,10 +804,10 @@ export default function Step3Page() {
                         Department
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
-                        Gross Salary (Software)
+                        Gross (Software)
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
-                        Gross Salary (HR)
+                        Gross (HR)
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
                         Difference
@@ -904,7 +874,7 @@ export default function Step3Page() {
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>
-                  Total Employees: {filteredData.length} | Staff:{" "}
+                  Total: {filteredData.length} | Staff:{" "}
                   {filteredData.filter((r) => r.department === "Staff").length}{" "}
                   | Worker:{" "}
                   {filteredData.filter((r) => r.department === "Worker").length}
@@ -918,7 +888,7 @@ export default function Step3Page() {
               </div>
             </div>
           )}
-        </div>  
+        </div>
       </div>
     </div>
   );
