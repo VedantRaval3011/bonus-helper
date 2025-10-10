@@ -13,6 +13,11 @@ export default function Step3Page() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
+  
+  // Password modal states
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   type FileSlot = { type: string; file: File | null };
 
@@ -139,11 +144,11 @@ export default function Step3Page() {
     setError(null);
 
     try {
-      console.log("=" .repeat(60));
+      console.log("=".repeat(60));
       console.log("🚫 OCTOBER EXCLUDE LIST (from Average sheet):");
       console.log(Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
       console.log("🚫 EXCLUDED DEPARTMENTS (Worker): C (Cash), A");
-      console.log("=" .repeat(60));
+      console.log("=".repeat(60));
 
       // ========== PROCESS STAFF FILE ==========
       const staffBuffer = await staffFile.arrayBuffer();
@@ -571,6 +576,36 @@ export default function Step3Page() {
     );
   };
 
+  // Handle Move to Step 4
+  const handleMoveToStep4 = () => {
+    const mismatchCount = comparisonData.filter((r) => r.status === "Mismatch").length;
+    
+    if (mismatchCount > 1) {
+      // Show password modal
+      setShowPasswordModal(true);
+      setPassword("");
+      setPasswordError("");
+    } else {
+      // Navigate directly
+      router.push("/step4");
+    }
+  };
+
+  // Handle password verification
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const correctPassword = process.env.NEXT_PUBLIC_NEXT_PASSWORD;
+    
+    if (password === correctPassword) {
+      setShowPasswordModal(false);
+      router.push("/step4");
+    } else {
+      setPasswordError("Incorrect password. Please try again.");
+      setPassword("");
+    }
+  };
+
   const FileCard = ({
     title,
     file,
@@ -769,25 +804,46 @@ export default function Step3Page() {
                     <option value="Worker">Worker Only</option>
                   </select>
                 </div>
-                <button
-                  onClick={exportToExcel}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                <div className="flex gap-3">
+                  <button
+                    onClick={exportToExcel}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  Export
-                </button>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    Export to Excel
+                  </button>
+                  <button
+                    onClick={handleMoveToStep4}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+                  >
+                    Move to Step 4
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 7l5 5m0 0l-5 5m5-5H6"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -890,6 +946,98 @@ export default function Step3Page() {
           )}
         </div>
       </div>
+
+      {/* Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-gray-800">
+                Password Required
+              </h3>
+              <button
+                onClick={() => setShowPasswordModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition"
+              >
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+            
+            <p className="text-gray-600 mb-6">
+              There are more than 1 mismatches. Please enter the password to proceed to Step 4.
+            </p>
+
+            <form onSubmit={handlePasswordSubmit}>
+              <div className="mb-4">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
+                  Password
+                </label>
+                <input
+                  type="password"
+                  id="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError("");
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Enter password"
+                  autoFocus
+                />
+                {passwordError && (
+                  <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    {passwordError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                >
+                  Submit
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
