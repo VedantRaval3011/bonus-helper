@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useFileContext } from "@/contexts/FileContext";
 import * as XLSX from "xlsx";
 
-export default function Step5Page() {
+export default function Step6Page() {
   const router = useRouter();
   const { fileSlots } = useFileContext();
   const [comparisonData, setComparisonData] = useState<any[]>([]);
@@ -13,6 +13,7 @@ export default function Step5Page() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
+  const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
 
   type FileSlot = { type: string; file: File | null };
 
@@ -41,12 +42,18 @@ export default function Step5Page() {
     pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??
     pickFile((s) => !!s.file && /actual.*percentage/i.test(s.file.name));
 
+  const dueVoucherFile =
+    pickFile((s) => s.type === "Due-Voucher-List") ??
+    pickFile((s) => !!s.file && /due.*voucher/i.test(s.file.name));
+
+  // Helper to normalize header text
   const norm = (x: any) =>
     String(x ?? "")
       .replace(/\s+/g, "")
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
+  // Constants from Step 5
   const MONTH_NAME_MAP: Record<string, number> = {
     JAN: 1, JANUARY: 1,
     FEB: 2, FEBRUARY: 2,
@@ -105,12 +112,65 @@ export default function Step5Page() {
 
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
-  const SPECIAL_GROSS_MULTIPLIER = 0.6; // 60% of gross for 12% employees
   const TOLERANCE = 12;
 
+  // Reference date for months calculation
+  const referenceDate = new Date(Date.UTC(2024, 9, 31)); // 2024-10-31 (UTC)
+
+  // Parse DOJ from various formats
+  function parseDOJ(raw: any): Date | null {
+    if (raw == null || raw === '') return null;
+    
+    if (typeof raw === 'number') {
+      const excelEpoch = Date.UTC(1899, 11, 30);
+      return new Date(excelEpoch + raw * 86400000);
+    }
+    
+    if (typeof raw === 'string') {
+      let s = raw.trim();
+      
+      if (/\d{4}-\d{2}-\d{2}\s+\d/.test(s)) {
+        s = s.split(/\s+/)[0];
+      }
+      
+      s = s.replace(/[.\/]/g, '-');
+
+      const m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
+      if (m) {
+        let [_, d, mo, y] = m;
+        let year = Number(y.length === 2 ? (Number(y) <= 29 ? '20' + y : '19' + y) : y);
+        let month = Number(mo) - 1;
+        let day = Number(d);
+        const dt = new Date(Date.UTC(year, month, day));
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const dt = new Date(s + 'T00:00:00Z');
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    
+    return null;
+  }
+
+  function monthsBetween(start: Date, end: Date): number {
+    const sy = start.getUTCFullYear(), sm = start.getUTCMonth(), sd = start.getUTCDate();
+    const ey = end.getUTCFullYear(), em = end.getUTCMonth(), ed = end.getUTCDate();
+    let m = (ey - sy) * 12 + (em - sm);
+    if (ed < sd) m -= 1;
+    return Math.max(0, m);
+  }
+
+  const calculateMonthsOfService = (dateOfJoining: any): number => {
+    const doj = parseDOJ(dateOfJoining);
+    if (!doj) return 0;
+    return monthsBetween(doj, referenceDate);
+  };
+
   const processFiles = async () => {
-    if (!staffFile || !workerFile || !bonusFile || !actualPercentageFile) {
-      setError("All four files are required for processing");
+    if (!staffFile || !workerFile || !bonusFile || !actualPercentageFile || !dueVoucherFile) {
+      setError("All five files are required for processing");
       return;
     }
 
@@ -119,12 +179,7 @@ export default function Step5Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 5: Register Calculation (60% Rule for 12% Employees)");
-      console.log("=".repeat(60));
-      console.log("⚡ NEW RULE: 12% employees = (Gross × 60%) × 12% = Gross × 7.2%");
-      console.log("📌 DEFAULT RULE: 8.33% employees = Gross × 8.33%");
-      console.log("🚫 OCTOBER EXCLUDE LIST:", Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
-      console.log("🚫 EXCLUDED DEPARTMENTS (Worker):", EXCLUDED_DEPARTMENTS.join(", "));
+      console.log("📊 STEP 6: Unpaid Verification (WITH DUPLICATE ID ACCUMULATION)");
       console.log("=".repeat(60));
 
       // ========== LOAD ACTUAL PERCENTAGE DATA ==========
@@ -172,36 +227,77 @@ export default function Step5Page() {
 
             if (empCode && !isNaN(empCode) && percentage === SPECIAL_PERCENTAGE) {
               specialPercentageEmployees.add(empCode);
-              console.log(
-                `✨ Employee ${empCode}: Special calculation (60% × 12% = 7.2% effective)`
-              );
             }
           }
         }
       }
 
-      console.log(
-        `📋 Employees with 60%×12% rule:`,
-        Array.from(specialPercentageEmployees).join(", ")
-      );
+      console.log(`✅ Special percentage employees: ${specialPercentageEmployees.size}`);
+
+      // ========== LOAD DUE VOUCHER DATA ==========
+      const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
+      const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
+      const dueVoucherSheet = dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
+      const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(dueVoucherSheet, { header: 1 });
+
+      const dueVCMap: Map<number, number> = new Map();
+      let dueVCHeaderRow = -1;
+
+      for (let i = 0; i < Math.min(10, dueVoucherData.length); i++) {
+        if (
+          dueVoucherData[i] &&
+          dueVoucherData[i].some((v: any) => {
+            const t = norm(v);
+            return t === "EMPCODE" || t === "EMPLOYEECODE";
+          })
+        ) {
+          dueVCHeaderRow = i;
+          break;
+        }
+      }
+
+      if (dueVCHeaderRow !== -1) {
+        const headers = dueVoucherData[dueVCHeaderRow];
+        const empCodeIdx = headers.findIndex((h: any) =>
+          ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
+        );
+        const dueVCIdx = headers.findIndex((h: any) =>
+          /DUE.*VC|DUEVC/i.test(norm(h))
+        );
+
+        if (empCodeIdx !== -1 && dueVCIdx !== -1) {
+          for (let i = dueVCHeaderRow + 1; i < dueVoucherData.length; i++) {
+            const row = dueVoucherData[i];
+            if (!row || row.length === 0) continue;
+
+            const empCode = Number(row[empCodeIdx]);
+            const dueVC = Number(row[dueVCIdx]) || 0;
+
+            if (empCode && !isNaN(empCode)) {
+              dueVCMap.set(empCode, dueVC);
+            }
+          }
+        }
+      }
+
+      console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
 
       // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
-      const hrRegisterData: Map<
-        number,
-        { registerHR: number; dept: string; occurrences: number }
+      // *** CHANGED: Use Map to accumulate register AND unpaid values for duplicate IDs ***
+      const hrUnpaidData: Map<
+        number, 
+        { unpaidHR: number; registerHR: number; dept: string; occurrences: number }
       > = new Map();
 
-      // Process Worker sheet (1st sheet) - Register in column S (index 18)
+      // Process Worker sheet (1st sheet)
       if (bonusWorkbook.SheetNames.length > 0) {
         const workerSheetName = bonusWorkbook.SheetNames[0];
-        console.log(`📄 Processing Worker sheet: ${workerSheetName}`);
+        console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
         const workerSheet = bonusWorkbook.Sheets[workerSheetName];
-        const workerData: any[][] = XLSX.utils.sheet_to_json(workerSheet, {
-          header: 1,
-        });
+        const workerData: any[][] = XLSX.utils.sheet_to_json(workerSheet, { header: 1 });
 
         let workerHeaderRow = -1;
         for (let i = 0; i < Math.min(10, workerData.length); i++) {
@@ -222,7 +318,16 @@ export default function Step5Page() {
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
-          const registerIdx = 18; // Column S (0-indexed)
+          const registerIdx = 18; // Column S
+          
+          let dueVCIdx = headers.findIndex((h: any) => {
+            const headerStr = String(h ?? "").trim();
+            return /DUE\s*VC|DUEVC/i.test(headerStr);
+          });
+          
+          if (dueVCIdx === -1) {
+            dueVCIdx = 19; // Column T
+          }
 
           for (let i = workerHeaderRow + 1; i < workerData.length; i++) {
             const row = workerData[i];
@@ -230,23 +335,27 @@ export default function Step5Page() {
 
             const empCode = Number(row[empCodeIdx]);
             const registerHR = Number(row[registerIdx]) || 0;
+            const unpaidHR = Number(row[dueVCIdx]) || 0;
 
             if (empCode && !isNaN(empCode)) {
-              if (hrRegisterData.has(empCode)) {
-                const existing = hrRegisterData.get(empCode)!;
+              // *** ACCUMULATE instead of REPLACE ***
+              if (hrUnpaidData.has(empCode)) {
+                const existing = hrUnpaidData.get(empCode)!;
                 existing.registerHR += registerHR;
+                existing.unpaidHR += unpaidHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(2)}, Total now: ₹${existing.registerHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
                 );
               } else {
-                hrRegisterData.set(empCode, {
+                hrUnpaidData.set(empCode, {
                   registerHR: registerHR,
+                  unpaidHR: unpaidHR,
                   dept: "Worker",
                   occurrences: 1,
                 });
                 console.log(
-                  `✅ Worker Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}`
+                  `✅ Worker Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}`
                 );
               }
             }
@@ -254,14 +363,12 @@ export default function Step5Page() {
         }
       }
 
-      // Process Staff sheet (2nd sheet) - Register in column T (index 19)
+      // Process Staff sheet (2nd sheet)
       if (bonusWorkbook.SheetNames.length > 1) {
         const staffSheetName = bonusWorkbook.SheetNames[1];
-        console.log(`📄 Processing Staff sheet: ${staffSheetName}`);
+        console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
         const staffSheet = bonusWorkbook.Sheets[staffSheetName];
-        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, {
-          header: 1,
-        });
+        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, { header: 1 });
 
         let staffHeaderRow = -1;
         for (let i = 0; i < Math.min(10, staffData.length); i++) {
@@ -282,7 +389,8 @@ export default function Step5Page() {
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
-          const registerIdx = 19; // Column T (0-indexed)
+          const registerIdx = 19; // Column T
+          const unpaidIdx = 21; // Column V
 
           for (let i = staffHeaderRow + 1; i < staffData.length; i++) {
             const row = staffData[i];
@@ -290,23 +398,27 @@ export default function Step5Page() {
 
             const empCode = Number(row[empCodeIdx]);
             const registerHR = Number(row[registerIdx]) || 0;
+            const unpaidHR = Number(row[unpaidIdx]) || 0;
 
             if (empCode && !isNaN(empCode)) {
-              if (hrRegisterData.has(empCode)) {
-                const existing = hrRegisterData.get(empCode)!;
+              // *** ACCUMULATE instead of REPLACE ***
+              if (hrUnpaidData.has(empCode)) {
+                const existing = hrUnpaidData.get(empCode)!;
                 existing.registerHR += registerHR;
+                existing.unpaidHR += unpaidHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(2)}, Total now: ₹${existing.registerHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
                 );
               } else {
-                hrRegisterData.set(empCode, {
+                hrUnpaidData.set(empCode, {
                   registerHR: registerHR,
+                  unpaidHR: unpaidHR,
                   dept: "Staff",
                   occurrences: 1,
                 });
                 console.log(
-                  `✅ Staff Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}`
+                  `✅ Staff Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}`
                 );
               }
             }
@@ -314,9 +426,10 @@ export default function Step5Page() {
         }
       }
 
-      console.log(`✅ HR Register data loaded: ${hrRegisterData.size} employees`);
+      console.log(`✅ HR Unpaid data loaded: ${hrUnpaidData.size} employees`);
       
-      const duplicateEmployees = Array.from(hrRegisterData.entries())
+      // Log employees with multiple occurrences
+      const duplicateEmployees = Array.from(hrUnpaidData.entries())
         .filter(([_, data]) => data.occurrences > 1);
       
       if (duplicateEmployees.length > 0) {
@@ -324,19 +437,19 @@ export default function Step5Page() {
         console.log("=".repeat(60));
         duplicateEmployees.forEach(([empId, data]) => {
           console.log(
-            `Emp ${empId}: ${data.occurrences} entries, Total Register (HR): ₹${data.registerHR.toFixed(2)}`
+            `Emp ${empId}: ${data.occurrences} entries, Total Register (HR): ₹${data.registerHR.toFixed(2)}, Total Unpaid (HR): ₹${data.unpaidHR.toFixed(2)}`
           );
         });
       }
 
-      // ========== COMPUTE GROSS SALARY (EXACT STEP-3 LOGIC) ==========
+      // ========== COMPUTE GROSS SALARY (EXACT STEP-5 LOGIC WITH OCTOBER ESTIMATION) ==========
       
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
       
       const staffEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number> }
+        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
       > = new Map();
 
       for (let sheetName of staffWorkbook.SheetNames) {
@@ -386,10 +499,27 @@ export default function Step5Page() {
             norm(h) === "SALARY1"
         );
 
-        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
-          console.log(`⚠️ Skip Staff ${sheetName}: missing columns`);
-          continue;
+        // Find DOJ column
+        let dojIdx = headers.findIndex((h: any) => {
+          const headerStr = String(h ?? "").trim();
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+        });
+
+        if (dojIdx === -1) {
+          for (let i = Math.max(0, headers.length - 3); i < headers.length; i++) {
+            const h = String(headers[i] ?? "").trim().toLowerCase();
+            if (h.includes("date") || h.includes("joining") || h.includes("doj")) {
+              dojIdx = i;
+              break;
+            }
+          }
         }
+
+        if (dojIdx === -1 && headers.length > 15) {
+          dojIdx = headers.length - 1;
+        }
+
+        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) continue;
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -398,6 +528,7 @@ export default function Step5Page() {
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
+          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -406,6 +537,7 @@ export default function Step5Page() {
               name: empName,
               dept: "Staff",
               months: new Map(),
+              dateOfJoining: doj,
             });
           }
 
@@ -421,7 +553,7 @@ export default function Step5Page() {
       
       const workerEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number> }
+        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
       > = new Map();
 
       for (let sheetName of workerWorkbook.SheetNames) {
@@ -450,10 +582,7 @@ export default function Step5Page() {
           }
         }
 
-        if (headerIdx === -1) {
-          console.log(`⚠️ Worker ${sheetName}: No header`);
-          continue;
-        }
+        if (headerIdx === -1) continue;
 
         const headers = data[headerIdx];
         const empIdIdx = headers.findIndex((h: any) =>
@@ -470,16 +599,17 @@ export default function Step5Page() {
         
         const salary1Idx = 8; // Column I
 
-        if (empIdIdx === -1 || empNameIdx === -1) {
-          console.log(`⚠️ Skip Worker ${sheetName}: missing columns`);
-          continue;
+        // Find DOJ column
+        let dojIdx = headers.findIndex((h: any) => {
+          const headerStr = String(h ?? "").trim();
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+        });
+
+        if (dojIdx === -1 && headers.length > 15) {
+          dojIdx = headers.length - 1;
         }
 
-        if (deptIdx === -1) {
-          console.log(`⚠️ Warning: Department column not found in ${sheetName}`);
-        }
-
-        let excludedDeptCount = 0;
+        if (empIdIdx === -1 || empNameIdx === -1) continue;
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -488,12 +618,11 @@ export default function Step5Page() {
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
+          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
 
           if (deptIdx !== -1) {
             const dept = String(row[deptIdx] || "").trim().toUpperCase();
-            
             if (EXCLUDED_DEPARTMENTS.includes(dept)) {
-              excludedDeptCount++;
               continue;
             }
           }
@@ -505,30 +634,27 @@ export default function Step5Page() {
               name: empName,
               dept: "Worker",
               months: new Map(),
+              dateOfJoining: doj,
             });
           }
 
           const emp = workerEmployees.get(empId)!;
           emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
         }
-
-        if (excludedDeptCount > 0) {
-          console.log(`💰 Filtered ${excludedDeptCount} workers from ${sheetName}`);
-        }
       }
 
       console.log(`✅ Worker employees: ${workerEmployees.size}`);
 
       // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION ==========
-      const grossSalaryData: Map<
+      const employeeData: Map<
         number,
-        { name: string; dept: string; grossSalary: number }
+        { name: string; dept: string; grossSalary: number; dateOfJoining: any }
       > = new Map();
 
       const foldMonthly = (
         src: Map<
           number,
-          { name: string; dept: string; months: Map<string, number> }
+          { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
         >
       ) => {
         for (const [empId, rec] of src) {
@@ -558,14 +684,15 @@ export default function Step5Page() {
             total = baseSum + estOct;
           }
 
-          if (!grossSalaryData.has(empId)) {
-            grossSalaryData.set(empId, {
+          if (!employeeData.has(empId)) {
+            employeeData.set(empId, {
               name: rec.name,
               dept: rec.dept,
               grossSalary: total,
+              dateOfJoining: rec.dateOfJoining,
             });
           } else {
-            grossSalaryData.get(empId)!.grossSalary += total;
+            employeeData.get(empId)!.grossSalary += total;
           }
         }
       };
@@ -573,58 +700,67 @@ export default function Step5Page() {
       foldMonthly(staffEmployees);
       foldMonthly(workerEmployees);
 
-      console.log(`✅ Gross Salary computed (Step-3 logic): ${grossSalaryData.size} employees`);
+      console.log(`✅ Employee data loaded: ${employeeData.size} employees`);
 
-      // ========== CALCULATE REGISTER WITH NEW 60% RULE ==========
+      // ========== CALCULATE UNPAID ==========
       const comparison: any[] = [];
 
-      for (const [empId, empData] of grossSalaryData) {
-        const is12PercentEmployee = specialPercentageEmployees.has(empId);
-        const percentage = is12PercentEmployee ? SPECIAL_PERCENTAGE : DEFAULT_PERCENTAGE;
+      for (const [empId, empData] of employeeData) {
+        const percentage = specialPercentageEmployees.has(empId)
+          ? SPECIAL_PERCENTAGE
+          : DEFAULT_PERCENTAGE;
 
-        // *** NEW CALCULATION LOGIC ***
-        let registerSoftware: number;
-        
-        if (is12PercentEmployee) {
-          // For 12% employees: (Gross × 60%) × 12%
-          const adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
-          registerSoftware = (adjustedGross * SPECIAL_PERCENTAGE) / 100;
-          
-          console.log(
-            `🎯 Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(2)} → 60%=₹${adjustedGross.toFixed(2)} → 12%=₹${registerSoftware.toFixed(2)}`
-          );
-        } else {
-          // For 8.33% employees: Gross × 8.33%
-          registerSoftware = (empData.grossSalary * DEFAULT_PERCENTAGE) / 100;
-          
-          console.log(
-            `📊 Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(2)} × 8.33%=₹${registerSoftware.toFixed(2)}`
-          );
+        const registerSoftware = (empData.grossSalary * percentage) / 100;
+
+        const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
+
+        let isEligible = true;
+        if (empData.dept === "Worker") {
+          isEligible = monthsOfService >= 6;
         }
 
-        const hrData = hrRegisterData.get(empId);
+        let unpaidSoftware = dueVCMap.get(empId) || 0;
+
+        if (!isEligible) {
+          unpaidSoftware = registerSoftware;
+        }
+
+        // *** Use accumulated register and unpaid values ***
+        const hrData = hrUnpaidData.get(empId);
         const registerHR = hrData?.registerHR || 0;
+        const unpaidHR = hrData?.unpaidHR || 0;
         const occurrences = hrData?.occurrences || 0;
 
-        const difference = registerSoftware - registerHR;
-        const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+        const difference = unpaidSoftware - unpaidHR;
+        let status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+
+        let validationError = "";
+        if (!isEligible && Math.abs(unpaidSoftware - registerSoftware) > TOLERANCE) {
+          validationError = "Employee is not eligible, so their Unpaid value must be equal to the Register.";
+          status = "Error";
+        }
 
         comparison.push({
           employeeId: empId,
           employeeName: empData.name,
           department: empData.dept,
-          grossSalarySoftware: empData.grossSalary,
+          monthsOfService: monthsOfService,
+          isEligible: isEligible,
           percentage: percentage,
+          grossSalarySoftware: empData.grossSalary,
           registerSoftware: registerSoftware,
           registerHR: registerHR,
+          unpaidSoftware: unpaidSoftware,
+          unpaidHR: unpaidHR,
           hrOccurrences: occurrences,
           difference: difference,
           status: status,
+          validationError: validationError,
         });
 
         if (occurrences > 1) {
           console.log(
-            `🔄 Emp ${empId}: ${occurrences} HR entries summed to ₹${registerHR.toFixed(2)}`
+            `🔄 Emp ${empId}: ${occurrences} HR entries summed - Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}`
           );
         }
       }
@@ -633,7 +769,7 @@ export default function Step5Page() {
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("✅ Register calculation completed with 60% rule for 12% employees");
+      console.log("✅ Unpaid verification completed with duplicate ID accumulation");
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -643,20 +779,29 @@ export default function Step5Page() {
   };
 
   useEffect(() => {
-    if (staffFile && workerFile && bonusFile && actualPercentageFile) {
+    if (staffFile && workerFile && bonusFile && actualPercentageFile && dueVoucherFile) {
       processFiles();
     }
-  }, [staffFile, workerFile, bonusFile, actualPercentageFile]);
+    // eslint-disable-next-line
+  }, [staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile]);
 
   useEffect(() => {
-    if (departmentFilter === "All") {
-      setFilteredData(comparisonData);
-    } else {
-      setFilteredData(
-        comparisonData.filter((row) => row.department === departmentFilter)
-      );
+    let filtered = comparisonData;
+
+    if (departmentFilter !== "All") {
+      filtered = filtered.filter((row) => row.department === departmentFilter);
     }
-  }, [departmentFilter, comparisonData]);
+
+    if (eligibilityFilter !== "All") {
+      if (eligibilityFilter === "Eligible") {
+        filtered = filtered.filter((row) => row.isEligible);
+      } else if (eligibilityFilter === "Not Eligible") {
+        filtered = filtered.filter((row) => !row.isEligible);
+      }
+    }
+
+    setFilteredData(filtered);
+  }, [departmentFilter, eligibilityFilter, comparisonData]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -667,39 +812,43 @@ export default function Step5Page() {
   };
 
   const exportToExcel = () => {
-    const dataToExport =
-      departmentFilter === "All" ? comparisonData : filteredData;
+    const dataToExport = departmentFilter === "All" && eligibilityFilter === "All"
+      ? comparisonData
+      : filteredData;
 
     const ws = XLSX.utils.json_to_sheet(
       dataToExport.map((row) => ({
         "Employee ID": row.employeeId,
         "Employee Name": row.employeeName,
         Department: row.department,
-        "Gross Salary (Software)": row.grossSalarySoftware,
+        "Months of Service": row.monthsOfService,
+        "Eligible": row.isEligible ? "YES" : "NO",
         "Percentage (%)": row.percentage,
+        "Gross Salary (Software)": row.grossSalarySoftware,
         "Register (Software)": row.registerSoftware,
         "Register (HR)": row.registerHR,
         "HR Occurrences": row.hrOccurrences,
+        "Unpaid (Software)": row.unpaidSoftware,
+        "Unpaid (HR)": row.unpaidHR,
         Difference: row.difference,
         Status: row.status,
+        "Validation Error": row.validationError || "",
       }))
     );
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Register Calculation");
-    XLSX.writeFile(wb, `Step5-Register-Calculation-${departmentFilter}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Unpaid Verification");
+    XLSX.writeFile(wb, `Step6-Unpaid-Verification-${departmentFilter}-${eligibilityFilter}.xlsx`);
   };
 
   const FileCard = ({
     title,
     file,
     description,
-    icon,
   }: {
     title: string;
     file: File | null;
     description: string;
-    icon: React.ReactNode;
   }) => (
     <div
       className={`border-2 rounded-lg p-6 ${
@@ -760,71 +909,102 @@ export default function Step5Page() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 py-5 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-100 py-5 px-4">
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-3xl font-bold text-gray-800">
-                Step 5 - Register Calculation (60% Rule for 12%)
+                Step 6 - Unpaid Verification (Duplicate ID Fix)
               </h1>
               <p className="text-gray-600 mt-2">
-                12% employees: (Gross × 60%) × 12% | 8.33% employees: Gross × 8.33%
+                Accumulates Register & Unpaid (HR) for duplicate Employee IDs
               </p>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => router.push("/step4")}
+                onClick={() => router.push("/step5")}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
               >
-                ← Back to Step 4
+                ← Back to Step 5
               </button>
               <button
                 onClick={() => router.push("/")}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition"
               >
                 Back to Step 1
-              </button>
-
-               <button
-                onClick={() => router.push("/step6")}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
-              >
-                Move to Step 6
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Info Box */}
+          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              Eligibility & Calculation Rules
+            </h3>
+            <div className="text-sm text-blue-800 space-y-2">
+              <p>
+                <strong>Staff:</strong> Always eligible
+              </p>
+              <p>
+                <strong>Worker:</strong> Eligible if ≥ 6 months service | NOT eligible if {"<"} 6 months → Unpaid = Register
+              </p>
+              <p className="text-xs text-blue-600 mt-2">
+                <strong>Register (Software):</strong> Gross Salary × Percentage (with Oct estimation)
+              </p>
+              <p className="text-xs text-blue-600">
+                <strong>Unpaid (Software):</strong> Due Voucher List file (DUE VC) for ALL employees
+              </p>
+              <p className="text-xs text-blue-600">
+                <strong>Unpaid (HR):</strong> Worker Col T, Staff Col V from Bonus file - Now sums duplicates!
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
               file={staffFile}
               description="Staff salary data (Nov-24 to Sep-25)"
-              icon={<></>}
             />
             <FileCard
               title="Indiana Worker"
               file={workerFile}
               description="Worker salary data (excludes Dept C, CASH, A)"
-              icon={<></>}
             />
             <FileCard
               title="Bonus Calculation Sheet"
               file={bonusFile}
-              description="HR Register values - Now sums duplicates!"
-              icon={<></>}
+              description="Register & Unpaid (HR): Worker Col T, Staff Col V"
             />
             <FileCard
               title="Actual Percentage Data"
               file={actualPercentageFile}
-              description="Employees with 12% bonus (60% rule applies)"
-              icon={<></>}
+              description="Employees with 12% bonus"
+            />
+            <FileCard
+              title="Due Voucher List"
+              file={dueVoucherFile}
+              description="DUE VC values for Unpaid (Software)"
             />
           </div>
 
-          {[staffFile, workerFile, bonusFile, actualPercentageFile].filter(
+          {[staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile].filter(
             Boolean
-          ).length < 4 && (
+          ).length < 5 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <svg
@@ -857,7 +1037,7 @@ export default function Step5Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Calculating with 60% rule for 12% employees...
+                  Processing with duplicate ID accumulation...
                 </p>
               </div>
             </div>
@@ -889,16 +1069,25 @@ export default function Step5Page() {
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-bold text-gray-800">
-                    Register Comparison
+                    Unpaid Verification Results
                   </h2>
                   <select
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
                     <option value="All">All Departments</option>
                     <option value="Staff">Staff Only</option>
                     <option value="Worker">Worker Only</option>
+                  </select>
+                  <select
+                    value={eligibilityFilter}
+                    onChange={(e) => setEligibilityFilter(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="All">All Eligibility</option>
+                    <option value="Eligible">Eligible Only</option>
+                    <option value="Not Eligible">Not Eligible Only</option>
                   </select>
                 </div>
                 <button
@@ -923,37 +1112,49 @@ export default function Step5Page() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
+                <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee ID
+                      <th className="border border-gray-300 px-3 py-2 text-left">
+                        Emp ID
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee Name
+                      <th className="border border-gray-300 px-3 py-2 text-left">
+                        Name
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Department
+                      <th className="border border-gray-300 px-3 py-2 text-left">
+                        Dept
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Gross (Software)
+                      <th className="border border-gray-300 px-3 py-2 text-center">
+                        MOS
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
+                      <th className="border border-gray-300 px-3 py-2 text-center">
+                        Eligible
+                      </th>
+                      <th className="border border-gray-300 px-3 py-2 text-center">
                         %
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Register (Software)
+                      <th className="border border-gray-300 px-3 py-2 text-right">
+                        Gross (SW)
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
+                      <th className="border border-gray-300 px-3 py-2 text-right">
+                        Register (SW)
+                      </th>
+                      <th className="border border-gray-300 px-3 py-2 text-right">
                         Register (HR)
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
+                      <th className="border border-gray-300 px-3 py-2 text-center">
                         HR Entries
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Difference
+                      <th className="border border-gray-300 px-3 py-2 text-right">
+                        Unpaid (SW)
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
+                      <th className="border border-gray-300 px-3 py-2 text-right">
+                        Unpaid (HR)
+                      </th>
+                      <th className="border border-gray-300 px-3 py-2 text-right">
+                        Diff
+                      </th>
+                      <th className="border border-gray-300 px-3 py-2 text-center">
                         Status
                       </th>
                     </tr>
@@ -962,17 +1163,19 @@ export default function Step5Page() {
                     {filteredData.map((row, idx) => (
                       <tr
                         key={idx}
-                        className={`${idx % 2 === 0 ? "bg-white" : "bg-gray-50"} ${
+                        className={`${
+                          idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                        } ${row.validationError ? "bg-red-50" : ""} ${
                           row.hrOccurrences > 1 ? "bg-yellow-50" : ""
                         }`}
                       >
-                        <td className="border border-gray-300 px-4 py-2">
+                        <td className="border border-gray-300 px-3 py-2">
                           {row.employeeId}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2">
+                        <td className="border border-gray-300 px-3 py-2">
                           {row.employeeName}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2">
+                        <td className="border border-gray-300 px-3 py-2">
                           <span
                             className={`px-2 py-1 rounded text-xs font-medium ${
                               row.department === "Staff"
@@ -983,10 +1186,21 @@ export default function Step5Page() {
                             {row.department}
                           </span>
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right">
-                          {formatCurrency(row.grossSalarySoftware)}
+                        <td className="border border-gray-300 px-3 py-2 text-center">
+                          {row.monthsOfService || 0}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
+                        <td className="border border-gray-300 px-3 py-2 text-center">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              row.isEligible
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {row.isEligible ? "YES" : "NO"}
+                          </span>
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-center">
                           <span
                             className={`px-2 py-1 rounded text-xs font-medium ${
                               row.percentage === 12.0
@@ -997,13 +1211,16 @@ export default function Step5Page() {
                             {row.percentage}%
                           </span>
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right">
+                        <td className="border border-gray-300 px-3 py-2 text-right">
+                          {formatCurrency(row.grossSalarySoftware)}
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right">
                           {formatCurrency(row.registerSoftware)}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right">
+                        <td className="border border-gray-300 px-3 py-2 text-right">
                           {formatCurrency(row.registerHR)}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
+                        <td className="border border-gray-300 px-3 py-2 text-center">
                           <span
                             className={`px-2 py-1 rounded text-xs font-medium ${
                               row.hrOccurrences > 1
@@ -1014,8 +1231,14 @@ export default function Step5Page() {
                             {row.hrOccurrences}
                           </span>
                         </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
+                          {formatCurrency(row.unpaidSoftware)}
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
+                          {formatCurrency(row.unpaidHR)}
+                        </td>
                         <td
-                          className={`border border-gray-300 px-4 py-2 text-right font-medium ${
+                          className={`border border-gray-300 px-3 py-2 text-right font-medium ${
                             Math.abs(row.difference) <= TOLERANCE
                               ? "text-green-600"
                               : "text-red-600"
@@ -1023,13 +1246,16 @@ export default function Step5Page() {
                         >
                           {formatCurrency(row.difference)}
                         </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
+                        <td className="border border-gray-300 px-3 py-2 text-center">
                           <span
-                            className={`px-3 py-1 rounded-full text-sm font-medium ${
+                            className={`px-3 py-1 rounded-full text-xs font-medium ${
                               row.status === "Match"
                                 ? "bg-green-100 text-green-800"
-                                : "bg-red-100 text-red-800"
+                                : row.status === "Error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-orange-100 text-orange-800"
                             }`}
+                            title={row.validationError || ""}
                           >
                             {row.status}
                           </span>
@@ -1040,6 +1266,24 @@ export default function Step5Page() {
                 </table>
               </div>
 
+              {filteredData.some((r) => r.validationError) && (
+                <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+                  <h3 className="font-medium text-red-800 mb-2">
+                    ⚠️ Validation Errors Found
+                  </h3>
+                  <div className="text-sm text-red-700 space-y-1">
+                    {filteredData
+                      .filter((r) => r.validationError)
+                      .map((row) => (
+                        <p key={row.employeeId}>
+                          <strong>Emp {row.employeeId} ({row.employeeName}):</strong>{" "}
+                          {row.validationError}
+                        </p>
+                      ))}
+                  </div>
+                </div>
+              )}
+
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>
                   Total: {filteredData.length} | Staff:{" "}
@@ -1048,10 +1292,18 @@ export default function Step5Page() {
                   {filteredData.filter((r) => r.department === "Worker").length}
                 </div>
                 <div>
+                  Eligible:{" "}
+                  {filteredData.filter((r) => r.isEligible).length} |
+                  Not Eligible:{" "}
+                  {filteredData.filter((r) => !r.isEligible).length}
+                </div>
+                <div>
                   Matches:{" "}
                   {filteredData.filter((r) => r.status === "Match").length} |
                   Mismatches:{" "}
                   {filteredData.filter((r) => r.status === "Mismatch").length} |
+                  Errors:{" "}
+                  {filteredData.filter((r) => r.status === "Error").length} |
                   Duplicates:{" "}
                   {filteredData.filter((r) => r.hrOccurrences > 1).length}
                 </div>

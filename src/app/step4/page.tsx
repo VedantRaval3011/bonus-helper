@@ -41,24 +41,38 @@ export default function Step4Page() {
 
   // Month parsing constants
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1, JANUARY: 1,
-    FEB: 2, FEBRUARY: 2,
-    MAR: 3, MARCH: 3,
-    APR: 4, APRIL: 4,
+    JAN: 1,
+    JANUARY: 1,
+    FEB: 2,
+    FEBRUARY: 2,
+    MAR: 3,
+    MARCH: 3,
+    APR: 4,
+    APRIL: 4,
     MAY: 5,
-    JUN: 6, JUNE: 6,
-    JUL: 7, JULY: 7,
-    AUG: 8, AUGUST: 8,
-    SEP: 9, SEPT: 9, SEPTEMBER: 9,
-    OCT: 10, OCTOBER: 10,
-    NOV: 11, NOVEMBER: 11,
-    DEC: 12, DECEMBER: 12,
+    JUN: 6,
+    JUNE: 6,
+    JUL: 7,
+    JULY: 7,
+    AUG: 8,
+    AUGUST: 8,
+    SEP: 9,
+    SEPT: 9,
+    SEPTEMBER: 9,
+    OCT: 10,
+    OCTOBER: 10,
+    NOV: 11,
+    NOVEMBER: 11,
+    DEC: 12,
+    DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
   const parseMonthFromSheetName = (sheetName: string): string | null => {
-    const s = String(sheetName ?? "").trim().toUpperCase();
+    const s = String(sheetName ?? "")
+      .trim()
+      .toUpperCase();
 
     // Case 1: YYYY-MM
     const yyyymm = s.match(/(\d{4})-(\d{1,2})/);
@@ -71,7 +85,9 @@ export default function Step4Page() {
     }
 
     // Case 2: MON or MONTH with 2/4 digit year nearby
-    const mon = s.match(/(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)/);
+    const mon = s.match(
+      /(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)/
+    );
     const monthFull = s.match(
       /(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)/
     );
@@ -90,8 +106,17 @@ export default function Step4Page() {
 
   // Months to average for October 2025 estimate
   const AVG_WINDOW: string[] = [
-    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03",
-    "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
+    "2024-11",
+    "2024-12",
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
   ];
 
   // Calculate percentage based on months of service
@@ -108,30 +133,47 @@ export default function Step4Page() {
       doj = new Date(dateOfJoining);
     }
 
-    // Calculate to October 2024 (as per typical bonus calculation period)
+    // Check if date is valid
+    if (isNaN(doj.getTime())) {
+      return 0;
+    }
+
+    // Calculate to October 31, 2024 (end of bonus period)
     const referenceDate = new Date(2024, 9, 31); // October 31, 2024
 
+    // Calculate total months of service
     const yearsDiff = referenceDate.getFullYear() - doj.getFullYear();
     const monthsDiff = referenceDate.getMonth() - doj.getMonth();
-    const totalMonths = yearsDiff * 12 + monthsDiff;
+    const daysDiff = referenceDate.getDate() - doj.getDate();
 
-    // Less than 1 year = 10%
-    if (totalMonths < 12) return 10;
-    // More than 1 year and less than 2 years = 12%
-    if (totalMonths >= 12 && totalMonths < 24) return 12;
-    // More than 2 years = 8.33%
-    return 8.33;
+    let totalMonths = yearsDiff * 12 + monthsDiff;
+
+    // Adjust for partial months
+    if (daysDiff < 0) {
+      totalMonths--;
+    }
+
+    // Apply percentage rules
+    if (totalMonths < 12) {
+      return 10; // Less than 1 year = 10%
+    } else if (totalMonths >= 12 && totalMonths < 24) {
+      return 12; // 1-2 years = 12%
+    } else {
+      return 8.33; // More than 2 years = 8.33%
+    }
   };
 
-  // Apply bonus formula: =IF(X26=8.33,Q26,IF(X26>8.33,Q26*0.6,""))
-  // Q26 is Gross2 (Software) from Step 3
-  const applyBonusFormula = (gross2Software: number, percentage: number): number => {
+  // *CORRECTED FORMULA*: =IF(X=8.33, Q, IF(X>8.33, Q*0.6, ""))
+  // Where X = percentage, Q = Gross SAL. (our gross2Software)
+  const applyBonusFormula = (grossSal: number, percentage: number): number => {
     if (percentage === 8.33) {
-      return gross2Software;
+      return grossSal;
     } else if (percentage > 8.33) {
-      return gross2Software * 0.6;
+      // This applies to 10% and 12% cases
+      return grossSal * 0.6;
     } else {
-      return 0; // Return 0 for percentages less than 8.33
+      // For percentage < 8.33, Excel returns "" (empty), we'll return 0
+      return 0;
     }
   };
 
@@ -145,7 +187,7 @@ export default function Step4Page() {
     setError(null);
 
     try {
-      // ========== STEP 1: Process Staff file to get Gross2 (Software) ==========
+      // ========== STEP 1: Process Staff file to get Gross SAL. (Software) ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
 
@@ -210,7 +252,9 @@ export default function Step4Page() {
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
           const doj = dojIdx !== -1 ? row[dojIdx] : null;
 
@@ -232,14 +276,14 @@ export default function Step4Page() {
 
       console.log(`Total staff employees: ${staffEmployees.size}`);
 
-      // ========== STEP 2: Calculate Gross2 (Software) with Oct-2025 estimate ==========
+      // ========== STEP 2: Calculate GROSS SAL. (Software) with Oct-2025 estimate ==========
       const softwareEmployeesTotals: Map<
         number,
         {
           name: string;
           dept: string;
           dateOfJoining: any;
-          gross2Software: number;
+          grossSal: number;
         }
       > = new Map();
 
@@ -268,7 +312,11 @@ export default function Step4Page() {
             : 0;
 
           console.log(
-            `Employee ${empId} (${rec.name}): Has Sep 2025 data, Base sum = ${baseSum}, Oct estimate = ${estOct}, Total = ${baseSum + estOct}`
+            `Employee ${empId} (${
+              rec.name
+            }): Has Sep 2025 data, Base sum = ${baseSum}, Oct estimate = ${estOct}, Total = ${
+              baseSum + estOct
+            }`
           );
         } else {
           console.log(
@@ -282,20 +330,23 @@ export default function Step4Page() {
           name: rec.name,
           dept: rec.dept,
           dateOfJoining: rec.dateOfJoining,
-          gross2Software: total,
+          grossSal: total,
         });
       }
 
       console.log(
-        `Total employees with Gross2 (Software): ${softwareEmployeesTotals.size}`
+        `Total employees with GROSS SAL. (Software): ${softwareEmployeesTotals.size}`
       );
 
-      // ========== STEP 3: Read Bonus file to get Gross2 (HR) - Staff Sheet Only ==========
+      // ========== STEP 3: Read Bonus file to get GROSS 02 (HR) and Department - SUM ALL OCCURRENCES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
-      // Map to store Gross2 values per employee (Staff only)
+      // Map to store SUM of all Gross2 values per employee (Staff only)
       const bonusGross2Map: Map<number, number> = new Map();
+      // Map to track employee names and departments
+      const bonusEmployeeNames: Map<number, string> = new Map();
+      const bonusEmployeeDepts: Map<number, string> = new Map();
 
       // Only process "Staff" sheet
       const staffSheetName = bonusWorkbook.SheetNames.find(
@@ -347,13 +398,28 @@ export default function Step4Page() {
         return hStr.includes("EMP") && hStr.includes("CODE");
       });
 
+      // Find Employee Name column
+      const empNameIdx = headers.findIndex((h: any) => {
+        const hStr = String(h || "").toUpperCase();
+        return hStr.includes("EMP") && hStr.includes("NAME");
+      });
+
+      // Find Department column
+      const deptIdx = headers.findIndex((h: any) => {
+        const hStr = String(h || "").toUpperCase();
+        return hStr.includes("DEPT") || hStr === "DEPTT." || hStr === "DEPTT";
+      });
+
       // Find GROSS 02 column
       const gross2Idx = headers.findIndex((h: any) => {
-        const hStr = String(h || "").trim().toUpperCase();
+        const hStr = String(h || "")
+          .trim()
+          .toUpperCase();
         return (
           hStr === "GROSS 02" ||
           hStr === "GROSS02" ||
-          (hStr.includes("GROSS") && (hStr.includes("02") || hStr.includes(" 2")))
+          (hStr.includes("GROSS") &&
+            (hStr.includes("02") || hStr.includes(" 2")))
         );
       });
 
@@ -372,32 +438,86 @@ export default function Step4Page() {
       }
 
       console.log(
-        `Staff sheet: Found EmpCode at index ${empCodeIdx}, GROSS 02 at index ${gross2Idx}`
+        `Staff sheet: Found EmpCode at index ${empCodeIdx}, Department at index ${deptIdx}, GROSS 02 at index ${gross2Idx}`
       );
 
-      // Process rows
+      // **KEY FIX**: SUM all GROSS 02 values for each employee ID
       let processedCount = 0;
+      const duplicateTracker: Map<number, number> = new Map();
+
       for (let i = bonusHeaderRow + 1; i < bonusSheetData.length; i++) {
         const row = bonusSheetData[i];
         if (!row || row.length === 0) continue;
 
         const empId = Number(row[empCodeIdx]);
         const gross2 = Number(row[gross2Idx]) || 0;
+        const empName = empNameIdx !== -1 ? String(row[empNameIdx] || "") : "";
+        const dept = deptIdx !== -1 ? String(row[deptIdx] || "") : "Staff";
 
         if (!empId || isNaN(empId)) continue;
 
-        // Store Gross2 value for this employee
-        bonusGross2Map.set(empId, gross2);
-        processedCount++;
+        // **CRITICAL CHANGE**: Add to existing sum instead of replacing
+        if (bonusGross2Map.has(empId)) {
+          const existingSum = bonusGross2Map.get(empId)!;
+          const newSum = existingSum + gross2;
+          bonusGross2Map.set(empId, newSum);
+
+          const occurrenceCount = (duplicateTracker.get(empId) || 1) + 1;
+          duplicateTracker.set(empId, occurrenceCount);
+
+          console.log(
+            `Duplicate found - Employee ${empId} (${empName}): Adding GROSS 02 = ${gross2} to existing ${existingSum} = ${newSum} (occurrence #${occurrenceCount})`
+          );
+        } else {
+          bonusGross2Map.set(empId, gross2);
+          bonusEmployeeNames.set(empId, empName);
+          bonusEmployeeDepts.set(empId, dept);
+          duplicateTracker.set(empId, 1);
+          processedCount++;
+          console.log(
+            `New employee ${empId} (${empName}, Dept: ${dept}): GROSS 02 = ${gross2}`
+          );
+        }
       }
 
-      console.log(`Staff sheet: Processed ${processedCount} employees`);
-      console.log(`Total employees found in bonus Staff sheet: ${bonusGross2Map.size}`);
-      console.log(`Sample Gross2 values from HR (Staff):`);
+      console.log(`Staff sheet: Processed ${processedCount} unique employees`);
+      console.log(
+        `Total unique employees in bonus Staff sheet: ${bonusGross2Map.size}`
+      );
+
+      // Log employees with multiple entries
+      const employeesWithDuplicates = Array.from(
+        duplicateTracker.entries()
+      ).filter(([_, count]) => count > 1);
+
+      if (employeesWithDuplicates.length > 0) {
+        console.log(
+          `\n${employeesWithDuplicates.length} employees with multiple entries:`
+        );
+        employeesWithDuplicates.forEach(([empId, count]) => {
+          const totalGross2 = bonusGross2Map.get(empId) || 0;
+          const name = bonusEmployeeNames.get(empId) || "Unknown";
+          const dept = bonusEmployeeDepts.get(empId) || "Unknown";
+          console.log(
+            `  Employee ${empId} (${name}, ${dept}): ${count} entries, Total GROSS 02 = ${totalGross2}`
+          );
+        });
+      }
+
+      console.log(
+        `\nSample GROSS 02 values from HR (Staff - ALL occurrences summed):`
+      );
       let sampleCount = 0;
       for (const [empId, gross2] of bonusGross2Map) {
         if (sampleCount < 5) {
-          console.log(`  EMP ${empId}: ${gross2}`);
+          const occurrences = duplicateTracker.get(empId) || 1;
+          const name = bonusEmployeeNames.get(empId) || "Unknown";
+          const dept = bonusEmployeeDepts.get(empId) || "Unknown";
+          console.log(
+            `  EMP ${empId} (${name}, ${dept}): ${gross2} (from ${occurrences} occurrence${
+              occurrences > 1 ? "s" : ""
+            })`
+          );
           sampleCount++;
         }
       }
@@ -408,9 +528,10 @@ export default function Step4Page() {
       for (const [empId, empData] of softwareEmployeesTotals) {
         const percentage = calculatePercentage(empData.dateOfJoining);
         const gross2HR = bonusGross2Map.get(empId) || 0;
+        const department = bonusEmployeeDepts.get(empId) || empData.dept;
 
-        // Apply formula using Gross2 (Software) from Step 3
-        const calculatedValue = applyBonusFormula(empData.gross2Software, percentage);
+        // Apply formula: IF(percentage=8.33, grossSal, IF(percentage>8.33, grossSal*0.6, grossSal*0.6))
+        const calculatedValue = applyBonusFormula(empData.grossSal, percentage);
 
         const difference = calculatedValue - gross2HR;
         const status = Math.abs(difference) <= 12 ? "Match" : "Mismatch";
@@ -418,10 +539,10 @@ export default function Step4Page() {
         calculationResults.push({
           employeeId: empId,
           employeeName: empData.name,
-          department: empData.dept,
+          department: department,
           dateOfJoining: empData.dateOfJoining,
           percentage: percentage,
-          gross2Software: empData.gross2Software,
+          grossSal: empData.grossSal,
           calculatedValue: calculatedValue,
           gross2HR: gross2HR,
           difference: difference,
@@ -432,13 +553,16 @@ export default function Step4Page() {
       // Check for employees in bonus sheet but not in staff
       for (const [empId, gross2] of bonusGross2Map) {
         if (!softwareEmployeesTotals.has(empId)) {
+          const name =
+            bonusEmployeeNames.get(empId) || "NOT FOUND IN STAFF FILE";
+          const dept = bonusEmployeeDepts.get(empId) || "Unknown";
           calculationResults.push({
             employeeId: empId,
-            employeeName: "NOT FOUND IN STAFF FILE",
-            department: "Unknown",
+            employeeName: name,
+            department: dept,
             dateOfJoining: null,
             percentage: 0,
-            gross2Software: 0,
+            grossSal: 0,
             calculatedValue: 0,
             gross2HR: gross2,
             difference: -gross2,
@@ -503,9 +627,9 @@ export default function Step4Page() {
         Department: row.department,
         "Date of Joining": formatDate(row.dateOfJoining),
         "Percentage (%)": row.percentage,
-        "Gross (Software)": row.gross2Software,
-        "Gross2 (Software)": row.calculatedValue,
-        "Gross2 (HR)": row.gross2HR,
+        "GROSS SAL. (Software)": row.grossSal,
+        "Calculated Value (GROSS 02)": row.calculatedValue,
+        "GROSS 02 (HR)": row.gross2HR,
         Difference: row.difference,
         Status: row.status,
       }))
@@ -527,8 +651,7 @@ export default function Step4Page() {
     <div
       className={`border-2 rounded-lg p-6 ${
         file ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
-      }`}
-    >
+      }`}>
       {file ? (
         <div className="space-y-3">
           <div className="bg-white rounded-lg p-4 border border-green-200">
@@ -547,8 +670,7 @@ export default function Step4Page() {
               className="w-4 h-4"
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+              viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -566,8 +688,7 @@ export default function Step4Page() {
               className="w-5 h-5"
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+              viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -596,20 +717,20 @@ export default function Step4Page() {
                 Step 4 - Staff Bonus Calculation
               </h1>
               <p className="text-gray-600 mt-2">
-                Calculate staff bonuses using percentage-based formula and compare with HR Gross2
+                Calculate staff bonuses using the formula: IF(percentage=8.33,
+                GROSS SAL., IF(percentage&gt;8.33, GROSS SAL.*0.6, GROSS
+                SAL.*0.6))
               </p>
             </div>
             <div className="flex gap-3">
               <button
                 onClick={() => router.push("/step3")}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-              >
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition">
                 ← Back to Step 3
               </button>
               <button
                 onClick={() => router.push("/")}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-              >
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
                 Back to Step 1
               </button>
             </div>
@@ -622,8 +743,7 @@ export default function Step4Page() {
                 className="w-5 h-5"
                 fill="none"
                 stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+                viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -635,16 +755,35 @@ export default function Step4Page() {
             </h3>
             <div className="text-sm text-blue-800 space-y-2">
               <p>
-                <strong>Formula:</strong> IF percentage = 8.33%, THEN Gross2 (Software) | IF percentage {">"} 8.33%, THEN Gross2 (Software) × 0.6 | ELSE 0
+                <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
+                Q*0.6, ""))
               </p>
               <p>
-                <strong>Gross2 (HR):</strong> Direct value from "GROSS 02" column in Staff sheet of Bonus file
+                <strong>Where:</strong>
               </p>
+              <ul className="list-disc ml-6 space-y-1">
+                <li>X = Percentage (calculated from Date of Joining)</li>
+                <li>
+                  Q = GROSS SAL. (sum of monthly salaries + Oct 2025 estimate)
+                </li>
+              </ul>
               <p>
-                <strong>Percentage Logic:</strong> {"<"} 1 year = 10% | 1-2 years = 12% | {">"} 2 years = 8.33%
+                <strong>Logic:</strong>
+              </p>
+              <ul className="list-disc ml-6 space-y-1">
+                <li>If percentage = 8.33% → Calculated Value = GROSS SAL.</li>
+                <li>
+                  If percentage &gt; 8.33% (10% or 12%) → Calculated Value =
+                  GROSS SAL. × 0.6
+                </li>
+              </ul>
+              <p>
+                <strong>GROSS 02 (HR):</strong> SUM of all "GROSS 02" values
+                from bonus file (for duplicate employee IDs)
               </p>
               <p className="text-xs text-blue-600 mt-2">
-                Note: Gross2 (Software) is calculated from Step 3 (sum of monthly Salary1 + Oct 2025 estimate if Sep 2025 exists)
+                Note: Percentage is calculated based on years of service: &lt;1
+                year = 10% | 1-2 years = 12% | &gt;2 years = 8.33%
               </p>
             </div>
           </div>
@@ -660,7 +799,7 @@ export default function Step4Page() {
             <FileCard
               title="Bonus Sheet"
               file={bonusFile}
-              description="Bonus calculation data with Gross2 (Staff sheet only)"
+              description="Bonus calculation data with GROSS 02 (Staff sheet only)"
             />
           </div>
 
@@ -672,8 +811,7 @@ export default function Step4Page() {
                   className="w-6 h-6 text-yellow-600"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
+                  viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -686,7 +824,8 @@ export default function Step4Page() {
                     Required files are missing
                   </h3>
                   <p className="text-sm text-yellow-600 mt-1">
-                    Please upload Indiana Staff and Bonus Sheet files in Step 1 to proceed.
+                    Please upload Indiana Staff and Bonus Sheet files in Step 1
+                    to proceed.
                   </p>
                 </div>
               </div>
@@ -713,8 +852,7 @@ export default function Step4Page() {
                   className="w-6 h-6 text-red-600"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
+                  viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -738,14 +876,12 @@ export default function Step4Page() {
                 <div className="flex gap-3">
                   <button
                     onClick={exportToExcel}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
-                  >
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2">
                     <svg
                       className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                      viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -757,15 +893,13 @@ export default function Step4Page() {
                   </button>
                   <button
                     onClick={() => router.push("/step5")}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2"
-                  >
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2">
                     Move to Step 5
                     <svg
                       className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                      viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -788,19 +922,22 @@ export default function Step4Page() {
                         Employee Name
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-left">
+                        Department
+                      </th>
+                      <th className="border border-gray-300 px-4 py-2 text-left">
                         Date of Joining
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
                         %
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
-                        Gross2 (Software)
+                        GROSS SAL. (Software)
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
-                        Calculated Value
+                        Calculated (GROSS 02)
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
-                        Gross2 (HR)
+                        GROSS 02 (HR)
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-right">
                         Difference
@@ -814,13 +951,17 @@ export default function Step4Page() {
                     {filteredData.map((row, idx) => (
                       <tr
                         key={idx}
-                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                      >
+                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                         <td className="border border-gray-300 px-4 py-2">
                           {row.employeeId}
                         </td>
                         <td className="border border-gray-300 px-4 py-2">
                           {row.employeeName}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-2 text-center">
+                          <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
+                            {row.department}
+                          </span>
                         </td>
                         <td className="border border-gray-300 px-4 py-2 text-sm">
                           {formatDate(row.dateOfJoining)}
@@ -829,7 +970,7 @@ export default function Step4Page() {
                           {row.percentage}%
                         </td>
                         <td className="border border-gray-300 px-4 py-2 text-right">
-                          {formatCurrency(row.gross2Software)}
+                          {formatCurrency(row.grossSal)}
                         </td>
                         <td className="border border-gray-300 px-4 py-2 text-right font-medium text-blue-600">
                           {formatCurrency(row.calculatedValue)}
@@ -842,8 +983,7 @@ export default function Step4Page() {
                             Math.abs(row.difference) <= 12
                               ? "text-green-600"
                               : "text-red-600"
-                          }`}
-                        >
+                          }`}>
                           {formatCurrency(row.difference)}
                         </td>
                         <td className="border border-gray-300 px-4 py-2 text-center">
@@ -852,8 +992,7 @@ export default function Step4Page() {
                               row.status === "Match"
                                 ? "bg-green-100 text-green-800"
                                 : "bg-red-100 text-red-800"
-                            }`}
-                          >
+                            }`}>
                             {row.status}
                           </span>
                         </td>
