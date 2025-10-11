@@ -14,7 +14,6 @@ export default function Step3Page() {
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   
-  // Password modal states
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -42,48 +41,24 @@ export default function Step3Page() {
         /bonus.*final.*calculation|bonus.*2024-25/i.test(s.file.name)
     );
 
-  // Helper to normalize header text
   const norm = (x: any) =>
     String(x ?? "")
       .replace(/\s+/g, "")
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
-  // Month parsing constants
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1,
-    JANUARY: 1,
-    FEB: 2,
-    FEBRUARY: 2,
-    MAR: 3,
-    MARCH: 3,
-    APR: 4,
-    APRIL: 4,
-    MAY: 5,
-    JUN: 6,
-    JUNE: 6,
-    JUL: 7,
-    JULY: 7,
-    AUG: 8,
-    AUGUST: 8,
-    SEP: 9,
-    SEPT: 9,
-    SEPTEMBER: 9,
-    OCT: 10,
-    OCTOBER: 10,
-    NOV: 11,
-    NOVEMBER: 11,
-    DEC: 12,
-    DECEMBER: 12,
+    JAN: 1, JANUARY: 1, FEB: 2, FEBRUARY: 2, MAR: 3, MARCH: 3,
+    APR: 4, APRIL: 4, MAY: 5, JUN: 6, JUNE: 6, JUL: 7, JULY: 7,
+    AUG: 8, AUGUST: 8, SEP: 9, SEPT: 9, SEPTEMBER: 9,
+    OCT: 10, OCTOBER: 10, NOV: 11, NOVEMBER: 11, DEC: 12, DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
-  // Parse "YYYY-MM" from sheet name
   const parseMonthFromSheetName = (sheetName: string): string | null => {
     const s = String(sheetName || "").trim().toUpperCase();
     
-    // Case 1: YYYY-MM format
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
@@ -91,7 +66,6 @@ export default function Step3Page() {
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
     
-    // Case 2: Month name with year
     const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
@@ -109,30 +83,39 @@ export default function Step3Page() {
     return null;
   };
 
-  // Months for averaging (Nov-24 to Sep-25)
   const AVG_WINDOW: string[] = [
     "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
     "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
   ];
 
-  // Months to EXCLUDE from any calculation
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
-
-  // *** DEPARTMENTS TO EXCLUDE FROM WORKER SALARY CALCULATION ***
   const EXCLUDED_DEPARTMENTS = ["C", "CASH", "A"];
-
   const TOLERANCE = 12;
 
-  // *** HARDCODED EXCLUDE LIST - Employees from Average sheet ***
-  // These employees will NOT get October estimate
+  // Employees who will NOT get October estimate
   const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
-    937,   // DAKSH VYAS
-    1039,  // GAUTAM CHACHIYA
-    1065,  // PRAVIN SABARIYA
-    1105,  // RAMJI PARMAR
-    59,    // DHAVAL MARU
-    161,   // MAYUR DABHI
+    937, 1039, 1065, 1105, 59, 161
   ]);
+
+  // *** UPDATED: Added employee 20 (Sanjay Rathod) ***
+  // Employees who should calculate Oct estimate INCLUDING zeros
+  const INCLUDE_ZEROS_IN_AVG = new Set<number>([
+    20,   // SANJAY RATHOD (Staff - zero in April) - ADDED!
+    27,   // KIRAN SASANIYA (zero in July, Aug)
+    882,  // SHRADDHA DHODHAKIYA (zero in June)
+    898,  // RAMNIK SOLANKI (zero in March, April)
+    999,  // HANSHABEN PARMAR (zero in April, May) - starts from Dec-24
+  ]);
+
+  // Employees who should calculate Oct estimate EXCLUDING zeros
+  const EXCLUDE_ZEROS_IN_AVG = new Set<number>([
+    1054, // Different employee (joined April 2025)
+  ]);
+
+  // Employee-specific work start months
+  const EMPLOYEE_START_MONTHS: Record<number, string> = {
+    999: "2024-12",  // Hanshaben Parmar joined December 2024
+  };
 
   const processFiles = async () => {
     if (!staffFile || !workerFile || !bonusFile) {
@@ -145,9 +128,11 @@ export default function Step3Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("🚫 OCTOBER EXCLUDE LIST (from Average sheet):");
-      console.log(Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
-      console.log("🚫 EXCLUDED DEPARTMENTS (Worker): C (Cash), A");
+      console.log("🚫 OCTOBER EXCLUDE LIST:", Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
+      console.log("✅ INCLUDE ZEROS IN AVG:", Array.from(INCLUDE_ZEROS_IN_AVG).join(", "));
+      console.log("⭕ EXCLUDE ZEROS IN AVG:", Array.from(EXCLUDE_ZEROS_IN_AVG).join(", "));
+      console.log("📅 CUSTOM START MONTHS:", JSON.stringify(EMPLOYEE_START_MONTHS));
+      console.log("🚫 EXCLUDED DEPARTMENTS: C (Cash), A");
       console.log("=".repeat(60));
 
       // ========== PROCESS STAFF FILE ==========
@@ -217,7 +202,11 @@ export default function Step3Page() {
 
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
+          const salary1Raw = row[salary1Idx];
+          
+          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
+            ? 0 
+            : Number(salary1Raw) || 0;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -230,7 +219,21 @@ export default function Step3Page() {
           }
 
           const emp = staffEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // Check if employee should be processed for this month
+          const startMonth = EMPLOYEE_START_MONTHS[empId];
+          if (startMonth && monthKey < startMonth) {
+            continue;
+          }
+          
+          // Store zero values for special employees
+          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+            emp.months.set(monthKey, salary1);
+          } else {
+            if (salary1 > 0) {
+              emp.months.set(monthKey, salary1);
+            }
+          }
         }
       }
 
@@ -284,7 +287,6 @@ export default function Step3Page() {
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
         
-        // *** FIND DEPARTMENT COLUMN ***
         const deptIdx = headers.findIndex((h: any) => {
           const normalized = norm(h);
           return normalized === "DEPT" || normalized === "DEPARTMENT" || normalized === "DEPTT";
@@ -298,7 +300,7 @@ export default function Step3Page() {
         }
 
         if (deptIdx === -1) {
-          console.log(`⚠️ Warning: Department column not found in ${sheetName}. Cannot filter departments.`);
+          console.log(`⚠️ Warning: Department column not found in ${sheetName}`);
         }
 
         let excludedDeptCount = 0;
@@ -310,16 +312,18 @@ export default function Step3Page() {
 
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
+          const salary1Raw = row[salary1Idx];
+          
+          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
+            ? 0 
+            : Number(salary1Raw) || 0;
 
-          // *** FILTER OUT EXCLUDED DEPARTMENTS: C (Cash) and A ***
           if (deptIdx !== -1) {
             const dept = String(row[deptIdx] || "").trim().toUpperCase();
             
             if (EXCLUDED_DEPARTMENTS.includes(dept)) {
               excludedDeptCount++;
               excludedDeptBreakdown[dept] = (excludedDeptBreakdown[dept] || 0) + 1;
-              console.log(`🚫 EXCLUDED: Emp ${empId} (${empName}) - Dept: ${dept}`);
               continue;
             }
           }
@@ -335,7 +339,21 @@ export default function Step3Page() {
           }
 
           const emp = workerEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // Check if employee should be processed for this month
+          const startMonth = EMPLOYEE_START_MONTHS[empId];
+          if (startMonth && monthKey < startMonth) {
+            continue;
+          }
+          
+          // Store zero values for special employees
+          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+            emp.months.set(monthKey, salary1);
+          } else {
+            if (salary1 > 0) {
+              emp.months.set(monthKey, salary1);
+            }
+          }
         }
 
         if (excludedDeptCount > 0) {
@@ -364,60 +382,73 @@ export default function Step3Page() {
           header: 1,
         });
 
-        let bonusHeaderRow = -1;
-        for (let i = 0; i < Math.min(8, bonusData.length); i++) {
+        const headerRows: number[] = [];
+        for (let i = 0; i < bonusData.length; i++) {
           if (
             bonusData[i] &&
             bonusData[i].includes("EMP Code") &&
             bonusData[i].includes("EMP. NAME")
           ) {
-            bonusHeaderRow = i;
-            break;
+            headerRows.push(i);
           }
         }
 
-        if (bonusHeaderRow === -1) {
-          console.log(`⚠️ Skip bonus ${sheetName}: No header`);
-          continue;
-        }
+        console.log(`   Found ${headerRows.length} data section(s) in ${sheetName}`);
 
-        const headers = bonusData[bonusHeaderRow];
-        const empCodeIdx = headers.indexOf("EMP Code");
-        const empNameIdx = headers.indexOf("EMP. NAME");
-        const deptIdx = headers.indexOf("Deptt.");
-        const grossIdx = headers.findIndex(
-          (h: any) =>
-            typeof h === "string" &&
-            /^(GROSS|Gross|GROSS SAL\.)$/i.test(h.trim())
-        );
+        for (let sectionIdx = 0; sectionIdx < headerRows.length; sectionIdx++) {
+          const bonusHeaderRow = headerRows[sectionIdx];
+          const nextHeaderRow = headerRows[sectionIdx + 1] || bonusData.length;
+          
+          console.log(`   📋 Processing section ${sectionIdx + 1} (rows ${bonusHeaderRow} to ${nextHeaderRow - 1})`);
 
-        if (grossIdx === -1) {
-          console.log(`⚠️ Skip bonus ${sheetName}: No Gross column`);
-          continue;
-        }
+          const headers = bonusData[bonusHeaderRow];
+          const empCodeIdx = headers.indexOf("EMP Code");
+          const empNameIdx = headers.indexOf("EMP. NAME");
+          const deptIdx = headers.indexOf("Deptt.");
+          const grossIdx = headers.findIndex(
+            (h: any) =>
+              typeof h === "string" &&
+              /^(GROSS|Gross|GROSS SAL\.)$/i.test(h.trim())
+          );
 
-        for (let i = bonusHeaderRow + 1; i < bonusData.length; i++) {
-          const row = bonusData[i];
-          if (!row || row.length === 0) continue;
+          if (grossIdx === -1) {
+            console.log(`   ⚠️ Skip section ${sectionIdx + 1}: No Gross column`);
+            continue;
+          }
 
-          const empId = Number(row[empCodeIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const dept = String(row[deptIdx] || "").trim().toUpperCase();
-          const gross = Number(row[grossIdx]) || 0;
+          for (let i = bonusHeaderRow + 1; i < nextHeaderRow; i++) {
+            const row = bonusData[i];
+            if (!row || row.length === 0) continue;
 
-          if (!empId || isNaN(empId) || !empName || isNaN(gross)) continue;
+            const empId = Number(row[empCodeIdx]);
+            const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+            const dept = String(row[deptIdx] || "").trim().toUpperCase();
+            const grossRaw = row[grossIdx];
+            
+            const gross = (grossRaw === null || grossRaw === undefined || grossRaw === "") 
+              ? 0 
+              : Number(grossRaw) || 0;
 
-          const deptType =
-            dept === "W" ? "Worker" : dept === "M" || dept === "S" ? "Staff" : "Unknown";
+            if (!empId || isNaN(empId) || !empName) continue;
+            if (gross === 0) continue;
 
-          if (bonusEmployees.has(empId)) {
-            bonusEmployees.get(empId)!.grossSalary += gross;
-          } else {
-            bonusEmployees.set(empId, {
-              name: empName,
-              grossSalary: gross,
-              dept: deptType,
-            });
+            const deptType =
+              dept === "W" ? "Worker" : dept === "M" || dept === "S" ? "Staff" : "Unknown";
+
+            if (bonusEmployees.has(empId)) {
+              const existing = bonusEmployees.get(empId)!;
+              const prevGross = existing.grossSalary;
+              existing.grossSalary += gross;
+              
+              console.log(`   🔄 EMP ${empId}: Adding ₹${gross.toFixed(2)} to existing ₹${prevGross.toFixed(2)} = ₹${existing.grossSalary.toFixed(2)}`);
+            } else {
+              bonusEmployees.set(empId, {
+                name: empName,
+                grossSalary: gross,
+                dept: deptType,
+              });
+              console.log(`   ➕ EMP ${empId}: New entry with ₹${gross.toFixed(2)}`);
+            }
           }
         }
       }
@@ -440,11 +471,37 @@ export default function Step3Page() {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
           
-          for (const mk of AVG_WINDOW) {
+          const includeZeros = INCLUDE_ZEROS_IN_AVG.has(empId);
+          const excludeZeros = EXCLUDE_ZEROS_IN_AVG.has(empId);
+          const hasCustomStart = EMPLOYEE_START_MONTHS[empId] !== undefined;
+          
+          // Build custom window for employees with start months
+          const employeeWindow = hasCustomStart
+            ? AVG_WINDOW.filter(mk => mk >= EMPLOYEE_START_MONTHS[empId])
+            : AVG_WINDOW;
+          
+          // Collect all months in window
+          for (const mk of employeeWindow) {
             const v = rec.months.get(mk);
-            if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
-              baseSum += Number(v);
-              monthsIncluded.push({ month: mk, value: Number(v) });
+            
+            if (includeZeros) {
+              // For employees with genuine zero months, include them
+              const val = v !== undefined ? Number(v) : 0;
+              baseSum += val;
+              monthsIncluded.push({ month: mk, value: val });
+            } else if (excludeZeros) {
+              // For mid-year joiners, only count months they were employed
+              if (v !== undefined && v !== null) {
+                const val = Number(v);
+                baseSum += val;
+                monthsIncluded.push({ month: mk, value: val });
+              }
+            } else {
+              // Normal employees: only non-zero months
+              if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
+                baseSum += Number(v);
+                monthsIncluded.push({ month: mk, value: Number(v) });
+              }
             }
           }
 
@@ -454,22 +511,58 @@ export default function Step3Page() {
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
 
           if (isExcluded) {
-            // Employee in exclude list - NO October estimate
             console.log(
               `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
-            // Normal employee with Sep-25 data - calculate October
-            const values = monthsIncluded.map(m => m.value);
-            estOct = values.reduce((a, b) => a + b, 0) / values.length;
+            // Calculate October estimate
+            if (includeZeros) {
+              // Use employeeWindow length for custom start dates
+              const divisor = hasCustomStart ? employeeWindow.length : 11;
+              estOct = baseSum / divisor;
+              
+              // Special logging for specific employees
+              if (empId === 20) {
+                console.log(
+                  `✅ EMP ${empId} (${rec.name}): STAFF + INCLUDE ZERO (April)\n` +
+                  `   All 11 months counted\n` +
+                  `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
+                  `   Oct Estimate (÷${divisor}): ₹${estOct.toFixed(2)}\n` +
+                  `   TOTAL: ₹${(baseSum + estOct).toFixed(2)}`
+                );
+              } else if (empId === 999) {
+                console.log(
+                  `✅ EMP ${empId} (${rec.name}): CUSTOM START (Dec-24) + INCLUDE ZEROS (Apr & May)\n` +
+                  `   Work window: Dec-24 to Sep-25 (${divisor} months)\n` +
+                  `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
+                  `   Oct Estimate (÷${divisor}): ₹${estOct.toFixed(2)}\n` +
+                  `   TOTAL: ₹${(baseSum + estOct).toFixed(2)}`
+                );
+              } else {
+                console.log(
+                  `✅ EMP ${empId} (${rec.name}): INCLUDING ZEROS\n` +
+                  `   Months: ${divisor} (${hasCustomStart ? 'custom start' : 'all months'})\n` +
+                  `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
+                  `   Oct Estimate: ₹${estOct.toFixed(2)}\n` +
+                  `   TOTAL: ₹${(baseSum + estOct).toFixed(2)}`
+                );
+              }
+            } else {
+              // Average of only counted months
+              const values = monthsIncluded.map(m => m.value);
+              estOct = values.reduce((a, b) => a + b, 0) / values.length;
+              
+              if (excludeZeros) {
+                console.log(
+                  `⭕ EMP ${empId} (${rec.name}): EXCLUDING ZEROS (mid-year joiner)\n` +
+                  `   Months counted: ${monthsIncluded.length}\n` +
+                  `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
+                  `   Oct Estimate: ₹${estOct.toFixed(2)}\n` +
+                  `   TOTAL: ₹${(baseSum + estOct).toFixed(2)}`
+                );
+              }
+            }
             total = baseSum + estOct;
-
-            console.log(
-              `💰 EMP ${empId} (${rec.name}):\n` +
-              `   Base Sum: ₹${baseSum.toFixed(2)}\n` +
-              `   Oct Estimate: ₹${estOct.toFixed(2)}\n` +
-              `   TOTAL: ₹${total.toFixed(2)}`
-            );
           } else {
             console.log(
               `⚠️ EMP ${empId} (${rec.name}): No Sep-25 data - Base only = ₹${baseSum.toFixed(2)}`
@@ -576,22 +669,18 @@ export default function Step3Page() {
     );
   };
 
-  // Handle Move to Step 4
   const handleMoveToStep4 = () => {
     const mismatchCount = comparisonData.filter((r) => r.status === "Mismatch").length;
     
     if (mismatchCount > 1) {
-      // Show password modal
       setShowPasswordModal(true);
       setPassword("");
       setPasswordError("");
     } else {
-      // Navigate directly
       router.push("/step4");
     }
   };
 
-  // Handle password verification
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -687,7 +776,7 @@ export default function Step3Page() {
                 Step 3 - Gross Salary Comparison
               </h1>
               <p className="text-gray-600 mt-2">
-                Nov-24 to Sep-25 + Oct-25 avg (excludes Dept A & C, EmpIDs: 937, 1039, 1065, 1105, 59, 161)
+                Nov-24 to Sep-25 + Oct-25 avg (Special: Staff ID 20 Apr=0, Worker ID 999 Dec start Apr&May=0, IDs 27,882,898 zeros | Excludes Dept A&C, IDs: 937,1039,1065,1105,59,161)
               </p>
             </div>
             <div className="flex gap-3">
@@ -722,7 +811,7 @@ export default function Step3Page() {
             <FileCard
               title="Bonus Sheet"
               file={bonusFile}
-              description="Bonus calculation"
+              description="Bonus calculation (all sections)"
               icon={<></>}
             />
           </div>
@@ -760,7 +849,7 @@ export default function Step3Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing (excluding Dept A & C, 6 employees from Oct estimate)...
+                  Processing with special handling (Staff ID 20 Apr=0, Worker ID 999 Dec-start)...
                 </p>
               </div>
             </div>

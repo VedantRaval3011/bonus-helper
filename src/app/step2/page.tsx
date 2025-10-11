@@ -66,6 +66,9 @@ export default function Step2Page() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [actualPercentageFile, setActualPercentageFile] = useState<File | null>(
+    null
+  );
 
   const calculateMonthlyDifferences = (): {
     canProceed: boolean;
@@ -403,6 +406,33 @@ export default function Step2Page() {
       } else if (++blanks > 8) break;
     }
     return sum;
+  };
+
+  const extractAverageSheetEmployeeIds = (
+    actualPercentageWb: ExcelJS.Workbook
+  ): Set<string> => {
+    const employeeIds = new Set<string>();
+    const ws = actualPercentageWb.getWorksheet("Average");
+
+    if (!ws) {
+      console.log("Average sheet not found");
+      return employeeIds;
+    }
+
+    // Header is in row 1, data starts from row 2
+    const empCodeCol = 2; // Column B
+
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const empCode = row.getCell(empCodeCol).value?.toString().trim();
+
+      if (empCode && empCode !== "") {
+        employeeIds.add(empCode);
+      }
+    }
+
+    console.log(`Found ${employeeIds.size} employee IDs in Average sheet`);
+    return employeeIds;
   };
 
   const readStaffSalary1Total = (ws: ExcelJS.Worksheet): number => {
@@ -1527,7 +1557,6 @@ export default function Step2Page() {
   ): Record<string, EmployeeMonthlySalary> => {
     const employees: Record<string, EmployeeMonthlySalary> = {};
     const months = generateMonthHeaders();
-
     const monthColMap: Record<string, number> = {
       "Nov-24": 6,
       "Dec-24": 7,
@@ -1540,6 +1569,7 @@ export default function Step2Page() {
       "Jul-25": 14,
       "Aug-25": 15,
       "Sep-25": 16,
+      "Oct-25": 17,
     };
 
     const ws = bonusWb.getWorksheet(sheetName);
@@ -1548,14 +1578,14 @@ export default function Step2Page() {
     let headerRow = -1;
     for (let r = 1; r <= 5; r++) {
       const row = ws.getRow(r);
-      const cellText = row.getCell(2).value?.toString().toUpperCase() || "";
-      if (cellText.includes("EMP") && cellText.includes("CODE")) {
+      const cellText = row.getCell(2).value?.toString().toUpperCase();
+      if (cellText?.includes("EMP") && cellText?.includes("CODE")) {
         headerRow = r;
         break;
       }
     }
 
-    if (headerRow < 0) return employees;
+    if (headerRow <= 0) return employees;
 
     const empCodeCol = 2;
     const deptCol = 3;
@@ -1563,33 +1593,33 @@ export default function Step2Page() {
 
     for (let r = headerRow + 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const code = row.getCell(empCodeCol).value?.toString().trim() || "";
+      const code = row.getCell(empCodeCol).value?.toString().trim() || ""; // ✅ Default to ""
       const name =
-        row.getCell(empNameCol).value?.toString().trim().toUpperCase() || "";
-      const dept = row.getCell(deptCol).value?.toString().trim() || "";
+        row.getCell(empNameCol).value?.toString().trim().toUpperCase() || ""; // ✅ Default to ""
+      const dept = row.getCell(deptCol).value?.toString().trim() || ""; // ✅ Default to ""
 
-      if (!name || name === "GRAND TOTAL") continue;
+      // ✅ Skip if no name or code
+      if (!name || !code || name === "GRAND TOTAL") continue;
 
-      const key = code || name;
+      const key = `${code}|${name}`;
 
       if (!employees[key]) {
         employees[key] = {
           name,
-          employeeCode: code,
-          department: dept,
+          employeeCode: code, // ✅ Now guaranteed to be string
+          department: dept, // ✅ Now guaranteed to be string
           monthlySalaries: {},
           source: "HR",
         };
         months.forEach((m) => (employees[key].monthlySalaries[m] = 0));
       }
 
+      // ✅ SUM all values for the same employee instead of replacing
       for (const [mKey, colNum] of Object.entries(monthColMap)) {
         const v = num(row.getCell(colNum));
         if (v > 0) {
-          const currentVal = employees[key].monthlySalaries[mKey] || 0;
-          if (currentVal === 0 || v > currentVal) {
-            employees[key].monthlySalaries[mKey] = v;
-          }
+          // ✅ ADD to existing value instead of replacing
+          employees[key].monthlySalaries[mKey] += v;
         }
       }
     }
@@ -1598,84 +1628,140 @@ export default function Step2Page() {
   };
 
   const compareEmployees = (
-  actualByKey: Record<string, EmployeeMonthlySalary>,
-  hrByKey: Record<string, EmployeeMonthlySalary>,
-  months: string[]
-): EmployeeComparison[] => {
-  const allKeys = new Set([...Object.keys(actualByKey), ...Object.keys(hrByKey)]);
-  const out: EmployeeComparison[] = [];
+    actualByKey: Record<string, EmployeeMonthlySalary>,
+    hrByKey: Record<string, EmployeeMonthlySalary>,
+    months: string[]
+  ): EmployeeComparison[] => {
+    const allKeys = new Set([
+      ...Object.keys(actualByKey),
+      ...Object.keys(hrByKey),
+    ]);
 
-  for (const key of allKeys) {
-    const a = actualByKey[key];
-    const h = hrByKey[key];
+    // ✅ NEW: Group employees by employee code to handle duplicates
+    const groupedActual: Record<string, EmployeeMonthlySalary[]> = {};
+    const groupedHR: Record<string, EmployeeMonthlySalary[]> = {};
 
-    const name = (a?.name || h?.name || "").toUpperCase();
-    const code = a?.employeeCode || h?.employeeCode || "";
-    const dept = a?.department || h?.department || "";
-
-    const actualSalaries: Record<string, number> = {};
-    const hrSalaries: Record<string, number> = {};
-    const monthsWithMismatch: string[] = [];
-    let hasMismatch = false;
-
-    for (const m of months) {
-      let av = a?.monthlySalaries[m] || 0;
-      const hv = h?.monthlySalaries[m] || 0;
-
-      // Get department for this specific month
-      const monthDept = (a?.monthlyDepartments?.[m] || dept).toUpperCase();
-      
-      // If department is C for this month, treat salary1 as null (0)
-      if (monthDept === "C") {
-        av = 0; // Ignore the actual salary1 value
+    // Group actual employees by employee code
+    for (const key of Object.keys(actualByKey)) {
+      const emp = actualByKey[key];
+      const code = emp.employeeCode;
+      if (!groupedActual[code]) {
+        groupedActual[code] = [];
       }
-
-      actualSalaries[m] = av;
-      hrSalaries[m] = hv;
-
-      // Check if this month should be ignored for mismatch detection
-      const shouldIgnoreMonth =
-        ["C", "A"].includes(monthDept) || code.toUpperCase() === "N";
-
-      // Only flag as mismatch if not in C/A department and not employee N
-      if (Math.abs(av - hv) > 1 && !shouldIgnoreMonth) {
-        hasMismatch = true;
-        monthsWithMismatch.push(m);
-      }
+      groupedActual[code].push(emp);
     }
 
-    const totalActual = Object.values(actualSalaries).reduce((s, v) => s + v, 0);
-    const totalHR = Object.values(hrSalaries).reduce((s, v) => s + v, 0);
+    // Group HR employees by employee code
+    for (const key of Object.keys(hrByKey)) {
+      const emp = hrByKey[key];
+      const code = emp.employeeCode;
+      if (!groupedHR[code]) {
+        groupedHR[code] = [];
+      }
+      groupedHR[code].push(emp);
+    }
 
-    out.push({
-      name,
-      employeeCode: code,
-      department: dept,
-      actualSalaries,
-      hrSalaries,
-      hasMismatch,
-      missingInHR: !h,
-      missingInActual: !a,
-      totalActual,
-      totalHR,
-      totalDifference: totalActual - totalHR,
-      monthsWithMismatch,
-      monthlyDepartments: a?.monthlyDepartments,
+    // Get all unique employee codes
+    const allCodes = new Set([
+      ...Object.keys(groupedActual),
+      ...Object.keys(groupedHR),
+    ]);
+
+    const out: EmployeeComparison[] = [];
+
+    for (const code of allCodes) {
+      const actualEmps = groupedActual[code] || [];
+      const hrEmps = groupedHR[code] || [];
+
+      // Get employee info (use first record)
+      const firstActual = actualEmps[0];
+      const firstHR = hrEmps[0];
+
+      const name = (firstActual?.name || firstHR?.name).toUpperCase();
+      const dept = firstActual?.department || firstHR?.department;
+
+      const actualSalaries: Record<string, number> = {};
+      const hrSalaries: Record<string, number> = {};
+      const monthsWithMismatch: string[] = [];
+      let hasMismatch = false;
+
+      for (const m of months) {
+        // ✅ SUM all values for this employee code across all records
+        let av = 0;
+        for (const emp of actualEmps) {
+          const salary = emp?.monthlySalaries?.[m] || 0;
+          const monthDept = emp?.monthlyDepartments?.[m] || dept.toUpperCase();
+
+          // If department is C for this month, treat salary1 as 0
+          if (monthDept !== "C") {
+            av += salary;
+          }
+        }
+
+        // ✅ SUM all HR values for this employee code
+        let hv = 0;
+        for (const emp of hrEmps) {
+          hv += emp?.monthlySalaries?.[m] || 0;
+        }
+
+        actualSalaries[m] = av;
+        hrSalaries[m] = hv;
+
+        // Check for mismatch
+        const monthDept =
+          firstActual?.monthlyDepartments?.[m] || dept.toUpperCase();
+        const shouldIgnoreMonth =
+          ["C", "A"].includes(monthDept) || code.toUpperCase() === "N";
+
+        if (Math.abs(av - hv) > 1 && !shouldIgnoreMonth) {
+          hasMismatch = true;
+          monthsWithMismatch.push(m);
+        }
+      }
+
+      const totalActual = Object.values(actualSalaries).reduce(
+        (s, v) => s + v,
+        0
+      );
+      const totalHR = Object.values(hrSalaries).reduce((s, v) => s + v, 0);
+
+      out.push({
+        name,
+        employeeCode: code,
+        department: dept,
+        actualSalaries,
+        hrSalaries,
+        hasMismatch,
+        missingInHR: hrEmps.length === 0,
+        missingInActual: actualEmps.length === 0,
+        totalActual,
+        totalHR,
+        totalDifference: totalActual - totalHR,
+        monthsWithMismatch,
+        monthlyDepartments: firstActual?.monthlyDepartments,
+      });
+    }
+
+    // Sort logic
+    out.sort((x, y) => {
+      if (x.missingInHR !== y.missingInHR) return x.missingInHR ? -1 : 1;
+      if (x.missingInActual !== y.missingInActual)
+        return x.missingInActual ? -1 : 1;
+      if (x.hasMismatch !== y.hasMismatch) return x.hasMismatch ? -1 : 1;
+      return 0;
     });
-  }
 
-  out.sort((x, y) => {
-    if (x.missingInHR !== y.missingInHR) return x.missingInHR ? -1 : 1;
-    if (x.missingInActual !== y.missingInActual) return x.missingInActual ? -1 : 1;
-    if (x.hasMismatch !== y.hasMismatch) return x.hasMismatch ? -1 : 1;
-    return 0;
-  });
-
-  return out;
-};
-
+    return out;
+  };
 
   const runSalaryComparison = async () => {
+    // Get actualPercentageFile from fileSlots context
+    const actualPercentageFileFromContext = pickFile(
+      (s) =>
+        s.type === "Actual-Percentage-Bonus" ||
+        (!!s.file && /actual.*percentage.*bonus/i.test(s.file.name))
+    );
+
     if (!staffFile || !workerFile || !bonusFile) {
       alert(
         "Please upload Indiana Staff, Indiana Worker, and Bonus Calculation files for comparison"
@@ -1695,6 +1781,38 @@ export default function Step2Page() {
       await staffWb.xlsx.load(await staffFile.arrayBuffer());
       await workerWb.xlsx.load(await workerFile.arrayBuffer());
       await bonusWb.xlsx.load(await bonusFile.arrayBuffer());
+
+      // Load Actual Percentage file if available and extract employee IDs from Average sheet
+      let averageSheetEmployeeIds = new Set<string>();
+      if (actualPercentageFileFromContext) {
+        const actualPercentageWb = new ExcelJS.Workbook();
+        await actualPercentageWb.xlsx.load(
+          await actualPercentageFileFromContext.arrayBuffer()
+        );
+
+        // Extract employee IDs from Average sheet
+        const ws = actualPercentageWb.getWorksheet("Average");
+        if (ws) {
+          const empCodeCol = 2; // Column B
+          for (let r = 2; r <= ws.rowCount; r++) {
+            const row = ws.getRow(r);
+            const empCode = row.getCell(empCodeCol).value?.toString().trim();
+            if (empCode && empCode !== "") {
+              averageSheetEmployeeIds.add(empCode);
+            }
+          }
+          console.log(
+            `Found ${averageSheetEmployeeIds.size} employee IDs in Average sheet:`,
+            Array.from(averageSheetEmployeeIds)
+          );
+        } else {
+          console.log("Average sheet not found in Actual Percentage file");
+        }
+      } else {
+        console.log(
+          "Actual Percentage Bonus file not provided - skipping Average sheet check"
+        );
+      }
 
       const staffSheetNames = staffWb.worksheets
         .map((ws) => ws.name)
@@ -1726,8 +1844,11 @@ export default function Step2Page() {
         workerWb,
         workerSheetNames
       );
+
+      // Function to calculate October average for actual employees
       const calculateOctoberAverageForActualEmployees = (
-        employees: Record<string, EmployeeMonthlySalary>
+        employees: Record<string, EmployeeMonthlySalary>,
+        averageSheetEmployeeIds: Set<string>
       ) => {
         const monthsToAverage = [
           "Nov-24",
@@ -1745,18 +1866,35 @@ export default function Step2Page() {
 
         for (const key in employees) {
           const emp = employees[key];
+
+          // CHECK 2: If employee ID is in Average sheet, exclude October values
+          if (averageSheetEmployeeIds.has(emp.employeeCode)) {
+            console.log(
+              `Excluding October for ${emp.name} (${emp.employeeCode}) - found in Average sheet`
+            );
+            emp.monthlySalaries["Oct-25"] = 0;
+            continue;
+          }
+
           const values: number[] = [];
+
+          // CHECK 1: Check if September salary1 exists
+          const septSalary = emp.monthlySalaries["Sep-25"] || 0;
+
+          // If September salary1 is 0 or doesn't exist, skip October calculation
+          if (septSalary < 1) {
+            emp.monthlySalaries["Oct-25"] = 0;
+            continue;
+          }
 
           // Collect all salary values from Nov-24 to Sep-25
           for (const month of monthsToAverage) {
             const salary = emp.monthlySalaries[month] || 0;
-
-            // Get department for this specific month
             const monthDept = emp.monthlyDepartments?.[month] || emp.department;
 
             // Ignore salary1 if department is C for this month
             if (monthDept.toUpperCase() === "C") {
-              continue; // Skip this month's salary
+              continue;
             }
 
             if (salary > 0) {
@@ -1770,61 +1908,23 @@ export default function Step2Page() {
               values.reduce((sum, val) => sum + val, 0) / values.length;
             emp.monthlySalaries["Oct-25"] = Math.round(average);
           } else {
-            // If all months were ignored (all dept C), set October to 0
             emp.monthlySalaries["Oct-25"] = 0;
           }
         }
       };
 
-      // Apply October calculation to both staff and worker actual data
-      calculateOctoberAverageForActualEmployees(staffEmployees);
-      calculateOctoberAverageForActualEmployees(workerEmployees);
+      // Apply October calculation with Average sheet employee IDs
+      calculateOctoberAverageForActualEmployees(
+        staffEmployees,
+        averageSheetEmployeeIds
+      );
+      calculateOctoberAverageForActualEmployees(
+        workerEmployees,
+        averageSheetEmployeeIds
+      );
 
       const hrStaffEmployees = extractHREmployees(bonusWb, "Staff");
       const hrWorkerEmployees = extractHREmployees(bonusWb, "Worker");
-
-      // ✅ NEW: Calculate October average for HR employees (Nov-24 to Sep-25)
-      const calculateOctoberAverageForHREmployees = (
-        employees: Record<string, EmployeeMonthlySalary>
-      ) => {
-        const monthsToAverage = [
-          "Nov-24",
-          "Dec-24",
-          "Jan-25",
-          "Feb-25",
-          "Mar-25",
-          "Apr-25",
-          "May-25",
-          "Jun-25",
-          "Jul-25",
-          "Aug-25",
-          "Sep-25",
-        ];
-
-        for (const key in employees) {
-          const emp = employees[key];
-          const values: number[] = [];
-
-          // Collect all salary values from Nov-24 to Sep-25
-          for (const month of monthsToAverage) {
-            const salary = emp.monthlySalaries[month] || 0;
-            if (salary > 0) {
-              values.push(salary);
-            }
-          }
-
-          // Calculate average and assign to October
-          if (values.length > 0) {
-            const average =
-              values.reduce((sum, val) => sum + val, 0) / values.length;
-            emp.monthlySalaries["Oct-25"] = Math.round(average);
-          }
-        }
-      };
-
-      // Apply October calculation to both staff and worker HR data
-      calculateOctoberAverageForHREmployees(hrStaffEmployees);
-      calculateOctoberAverageForHREmployees(hrWorkerEmployees);
 
       console.log(`Staff employees: ${Object.keys(staffEmployees).length}`);
       console.log(`Worker employees: ${Object.keys(workerEmployees).length}`);
@@ -2080,99 +2180,134 @@ export default function Step2Page() {
 
       for (const m of months) {
         if (m === "Oct-25") {
-          // A value calculation
-          const A_v1 = calculateOctoberAverageForStaff(staffWb, staffMap);
-          const A_v2 = calculateOctoberAverageForHR(
-            monthWiseWb,
-            workerWb,
-            workerMap
-          );
+          // ✅ A value calculation - Sum from comparison results
+          // A_v1: Sum of all Staff employees' October ACTUAL values from comparison table
+          let A_v1 = 0;
+          if (comparisonResults) {
+            comparisonResults.staffComparisons.forEach((emp) => {
+              const octActual = emp.actualSalaries["Oct-25"] || 0;
+              A_v1 += octActual;
+            });
+          }
+
+          // A_v2: Sum of all Staff employees' October HR values from comparison table
+          let A_v2 = 0;
+          if (comparisonResults) {
+            comparisonResults.staffComparisons.forEach((emp) => {
+              const octHR = emp.hrSalaries["Oct-25"] || 0;
+              A_v2 += octHR;
+            });
+          }
+
+          console.log("=== A Value Calculation (October) ===");
+          console.log(`A_v1 (Staff Actual Sum): ${A_v1.toLocaleString()}`);
+          console.log(`A_v2 (Staff HR Sum): ${A_v2.toLocaleString()}`);
+
           const A_diff = A_v2 - A_v1;
 
-          // B value calculation
-          // B value calculation (EXISTING)
-          const B_staffOct = calculateOctoberAverageForStaff(staffWb, staffMap);
-          const B_workerOct = calculateOctoberAverageForWorker(
-            workerWb,
-            workerMap
-          );
-          const B_v1 = B_staffOct + B_workerOct;
+          // ✅ B value calculation - NEW: Use comparison results for both staff and worker
+          let B_v1 = 0;
           let B_v2 = 0;
-          if (bonusWb) {
-            const bonusOctober = getBonusOctoberTotals(bonusWb);
-            B_v2 = bonusOctober.staff + bonusOctober.worker;
+
+          if (comparisonResults) {
+            // Sum all Staff October ACTUAL values
+            comparisonResults.staffComparisons.forEach((emp) => {
+              const octActual = emp.actualSalaries["Oct-25"] || 0;
+              B_v1 += octActual;
+            });
+
+            // Sum all Worker October ACTUAL values
+            comparisonResults.workerComparisons.forEach((emp) => {
+              const octActual = emp.actualSalaries["Oct-25"] || 0;
+              B_v1 += octActual;
+            });
+
+            // Sum all Staff October HR values
+            comparisonResults.staffComparisons.forEach((emp) => {
+              const octHR = emp.hrSalaries["Oct-25"] || 0;
+              B_v2 += octHR;
+            });
+
+            // Sum all Worker October HR values
+            comparisonResults.workerComparisons.forEach((emp) => {
+              const octHR = emp.hrSalaries["Oct-25"] || 0;
+              B_v2 += octHR;
+            });
           }
 
-          // NEW: Calculate October B Extras as average of 11 months
-          let totalExtras = 0;
-          const extrasMonths = [
-            "Nov-24",
-            "Dec-24",
-            "Jan-25",
-            "Feb-25",
-            "Mar-25",
-            "Apr-25",
-            "May-25",
-            "Jun-25",
-            "Jul-25",
-            "Aug-25",
-            "Sep-25",
-          ];
-          for (const em of extrasMonths) {
-            totalExtras += calculateBExtras(workerWb, workerMap, em);
-          }
-          const B_extras = totalExtras / extrasMonths.length;
+          console.log("=== B Value Calculation (October) ===");
+          console.log(
+            `B_v1 (Staff + Worker Actual Sum): ${B_v1.toLocaleString()}`
+          );
+          console.log(`B_v2 (Staff + Worker HR Sum): ${B_v2.toLocaleString()}`);
 
-          // NEW: Update diff calculation
+          // ✅ Calculate October B Extras from comparison results
+          let B_extras = 0;
+
+          if (comparisonResults) {
+            // Sum all Worker October ACTUAL values where department is C, A, or employee ID is 'N'
+            comparisonResults.workerComparisons.forEach((emp) => {
+              const dept = emp.department.toUpperCase();
+              const empId = emp.employeeCode.toUpperCase();
+
+              // Check if employee is in C, A department or has ID 'N'
+              if (["C", "A"].includes(dept) || empId === "N") {
+                const octActual = emp.actualSalaries["Oct-25"] || 0;
+                B_extras += octActual;
+              }
+            });
+
+            console.log(
+              `✅ B_extras for October (from comparison): ₹${B_extras.toLocaleString()}`
+            );
+          }
+
           const B_diff = B_v2 - B_v1 + B_extras;
 
-          // NEW: C value calculation
+          // C value calculation
           const C_staffGross = calculateStaffGrossOctober(staffWb, staffMap);
           const C_workerSalary1 = calculateOctoberAverageForWorker(
             workerWb,
             workerMap
           );
           const C_v1 = C_staffGross + C_workerSalary1;
-
-          // C(HR) = Average of GROSS SALARY from Month-Wise Sheet across 11 months
-          const C_v2 = getCHR(monthWiseWb, workerWb, workerMap); // ✅ CORRECT - passing monthWiseWb
+          const C_v2 = getCHR(monthWiseWb, workerWb, workerMap);
           const C_diff = C_v2 - C_v1;
 
-          const D_v1 = C_v1; // Reuse C(Software) value
-
-          // D(HR) = Average of GROSS SALARY from Bonus Summary (Nov-24 to Sep-25)
+          // D value calculation
+          const D_v1 = C_v1;
           const D_v2 = getDHR(bonusSummaryWb);
           const D_diff = D_v2 - D_v1;
 
-          const E_v1 = D_v1 * 0.0833; // 8.33% of D(Software)
-
-          // E(HR) = Average of FD from Bonus Summary (Nov-24 to Sep-25)
+          // E value calculation
+          const E_v1 = D_v1 * 0.0833;
           const E_v2 = getEHR(bonusSummaryWb);
           const E_diff = E_v2 - E_v1;
 
-          // Update the software, hr, and diff objects for October
           software[m] = {
             A: round(A_v1),
             B: round(B_v1),
             C: round(C_v1),
             D: round(D_v1),
-            E: round(E_v1), // 8.33% of D(Software)
+            E: round(E_v1),
           };
+
           hr[m] = {
             A: round(A_v2),
             B: round(B_v2),
             C: round(C_v2),
             D: round(D_v2),
-            E: round(E_v2), // Average FD from Bonus Summary
+            E: round(E_v2),
           };
+
           extras[m] = {
-            // ✅ This line should already be here
             A: 0,
             B: round(B_extras),
             C: 0,
             D: 0,
             E: 0,
           };
+
           diff[m] = {
             A: round(A_diff),
             B: round(B_diff),
@@ -2180,6 +2315,7 @@ export default function Step2Page() {
             D: round(D_diff),
             E: round(E_diff),
           };
+
           continue;
         }
 
@@ -2189,63 +2325,93 @@ export default function Step2Page() {
           workerMap[m]
         );
 
+        // A value
         let A_v1 = 0;
-        if (staffSheet) A_v1 = readStaffSalary1Total(staffSheet);
+        if (staffSheet) {
+          A_v1 = readStaffSalary1Total(staffSheet);
+        }
+
         let A_v2 = 0;
         if (workerMonthSheet) {
-          const { col, headerRow } = findColByHeader(workerMonthSheet, [
-            "WD",
-            "SALARY",
-          ]);
+          const { col, headerRow } = findColByHeader(
+            workerMonthSheet,
+            ["WD"],
+            ["SALARY"]
+          );
           A_v2 = readColumnGrandTotal(workerMonthSheet, col, headerRow);
         }
+
         const A_diff = A_v2 - A_v1;
 
-        let B_v1_staff = 0,
-          B_v1_worker = 0;
-        if (staffSheet) B_v1_staff = readStaffSalary1Total(staffSheet);
+        // B value
+        let B_v1staff = 0,
+          B_v1worker = 0;
+        if (staffSheet) {
+          B_v1staff = readStaffSalary1Total(staffSheet);
+        }
+
         const workerSheetForMonth = workerWb.getWorksheet(workerMap[m]);
-        if (workerSheetForMonth)
-          B_v1_worker = sumWorkerSalary1(workerSheetForMonth);
-        const B_v1 = B_v1_staff + B_v1_worker;
+        if (workerSheetForMonth) {
+          B_v1worker = sumWorkerSalary1(workerSheetForMonth);
+        }
+
+        const B_v1 = B_v1staff + B_v1worker;
         const B_v2 = bonusMonthly[m]
           ? bonusMonthly[m].worker + bonusMonthly[m].staff
           : 0;
 
-        // NEW: Calculate B Extras
+        // Calculate B Extras
         const B_extras = calculateBExtras(workerWb, workerMap, m);
 
-        // NEW: Update diff calculation to include extras
-        const B_diff = B_v2 - B_v1 + B_extras; // Changed formula
+        // Update diff calculation to include extras
+        const B_diff = B_v2 - B_v1 + B_extras;
 
-        let C_g1_worker = 0,
-          C_g1_staffGross = 0;
-        if (workerSheetForMonth)
-          C_g1_worker = sumWorkerSalary1(workerSheetForMonth);
-        if (staffSheet) C_g1_staffGross = readStaffGrossTotal(staffSheet);
-        const C_v1 = C_g1_worker + C_g1_staffGross;
+        // C value
+        let C_g1worker = 0,
+          C_g1staffGross = 0;
+        if (workerSheetForMonth) {
+          C_g1worker = sumWorkerSalary1(workerSheetForMonth);
+        }
+        if (staffSheet) {
+          C_g1staffGross = readStaffGrossTotal(staffSheet);
+        }
+
+        const C_v1 = C_g1worker + C_g1staffGross;
 
         let C_v2 = 0;
         const monthWiseMonth = (monthWiseWb || workerWb).getWorksheet(
           workerMap[m]
         );
-        if (monthWiseMonth) C_v2 = getGrossSalaryGrandTotal(monthWiseMonth);
+        if (monthWiseMonth) {
+          C_v2 = getGrossSalaryGrandTotal(monthWiseMonth);
+        }
+
         const C_diff = C_v2 - C_v1;
 
-        let D1_worker = 0,
-          D1_staffGross = 0;
-        if (workerSheetForMonth)
-          D1_worker = sumWorkerSalary1(workerSheetForMonth);
-        if (staffSheet) D1_staffGross = readStaffGrossTotal(staffSheet);
-        const D_v1 = D1_worker + D1_staffGross;
+        // D value
+        let D_1worker = 0,
+          D_1staffGross = 0;
+        if (workerSheetForMonth) {
+          D_1worker = sumWorkerSalary1(workerSheetForMonth);
+        }
+        if (staffSheet) {
+          D_1staffGross = readStaffGrossTotal(staffSheet);
+        }
+
+        const D_v1 = D_1worker + D_1staffGross;
         const D_v2 = bonusSummaryMonthlyGross[m] ?? 0;
 
-        let E1_worker = 0,
-          E1_staffGross = 0;
-        if (workerSheetForMonth)
-          E1_worker = sumWorkerSalary1(workerSheetForMonth);
-        if (staffSheet) E1_staffGross = readStaffGrossTotal(staffSheet);
-        const E_v1 = (E1_worker + E1_staffGross) * 0.0833;
+        // E value
+        let E_1worker = 0,
+          E_1staffGross = 0;
+        if (workerSheetForMonth) {
+          E_1worker = sumWorkerSalary1(workerSheetForMonth);
+        }
+        if (staffSheet) {
+          E_1staffGross = readStaffGrossTotal(staffSheet);
+        }
+
+        const E_v1 = (E_1worker + E_1staffGross) * 0.0833;
         const E_v2 = bonusSummaryMonthlyFD[m] ?? 0;
 
         software[m] = {
@@ -2255,6 +2421,7 @@ export default function Step2Page() {
           D: round(D_v1),
           E: round(E_v1),
         };
+
         hr[m] = {
           A: round(A_v2),
           B: round(B_v2),
@@ -2262,6 +2429,7 @@ export default function Step2Page() {
           D: round(D_v2),
           E: round(E_v2),
         };
+
         diff[m] = {
           A: round(A_diff),
           B: round(B_diff),
@@ -2269,6 +2437,7 @@ export default function Step2Page() {
           D: round(D_v2 - D_v1),
           E: round(E_v2 - E_v1),
         };
+
         extras[m] = {
           A: 0,
           B: round(B_extras),
