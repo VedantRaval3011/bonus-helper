@@ -148,15 +148,6 @@ useEffect(() => {
   });
 }, [comparisonData]);
 
-useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const batchId = `step5-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const items = [buildStep5SummaryMessage(comparisonData), ...buildStep5MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep5(items, batchId).catch(err => console.error('Auto-audit step5 failed', err));
-}, [comparisonData]);
 
 
 
@@ -290,62 +281,64 @@ useEffect(() => {
       console.log("=".repeat(60));
 
       // ========== LOAD ACTUAL PERCENTAGE DATA ==========
-      const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
-      const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
-      const actualPercentageSheet =
-        actualPercentageWorkbook.Sheets[actualPercentageWorkbook.SheetNames[0]];
-      const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
-        actualPercentageSheet,
-        { header: 1 }
-      );
+// ========== LOAD ACTUAL PERCENTAGE DATA ==========
+const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
+const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
+const actualPercentageSheet =
+  actualPercentageWorkbook.Sheets[actualPercentageWorkbook.SheetNames[0]];
+const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
+  actualPercentageSheet,
+  { header: 1 }
+);
 
-      const specialPercentageEmployees = new Set<number>();
-      let headerRow = -1;
+// Store actual percentage value for each employee
+const employeePercentageMap = new Map<number, number>();
+let headerRow = -1;
 
-      for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
-        if (
-          actualPercentageData[i] &&
-          actualPercentageData[i].some((v: any) => {
-            const t = norm(v);
-            return t === "EMPCODE" || t === "EMPLOYEECODE";
-          })
-        ) {
-          headerRow = i;
-          break;
-        }
-      }
+for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
+  if (
+    actualPercentageData[i] &&
+    actualPercentageData[i].some((v: any) => {
+      const t = norm(v);
+      return t === "EMPCODE" || t === "EMPLOYEECODE";
+    })
+  ) {
+    headerRow = i;
+    break;
+  }
+}
 
-      if (headerRow !== -1) {
-        const headers = actualPercentageData[headerRow];
-        const empCodeIdx = headers.findIndex((h: any) =>
-          ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
+if (headerRow !== -1) {
+  const headers = actualPercentageData[headerRow];
+  const empCodeIdx = headers.findIndex((h: any) =>
+    ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
+  );
+  const percentageIdx = headers.findIndex((h: any) =>
+    /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
+  );
+
+  if (empCodeIdx !== -1 && percentageIdx !== -1) {
+    for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
+      const row = actualPercentageData[i];
+      if (!row || row.length === 0) continue;
+
+      const empCode = Number(row[empCodeIdx]);
+      const percentage = Number(row[percentageIdx]);
+
+      if (empCode && !isNaN(empCode) && percentage && !isNaN(percentage)) {
+        employeePercentageMap.set(empCode, percentage);
+        console.log(
+          `✅ Employee ${empCode}: Custom percentage ${percentage}%`
         );
-        const percentageIdx = headers.findIndex((h: any) =>
-          /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
-        );
-
-        if (empCodeIdx !== -1 && percentageIdx !== -1) {
-          for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
-            const row = actualPercentageData[i];
-            if (!row || row.length === 0) continue;
-
-            const empCode = Number(row[empCodeIdx]);
-            const percentage = Number(row[percentageIdx]);
-
-            if (empCode && !isNaN(empCode) && percentage === SPECIAL_PERCENTAGE) {
-              specialPercentageEmployees.add(empCode);
-              console.log(
-                `✨ Employee ${empCode}: Special calculation (60% × 12% = 7.2% effective)`
-              );
-            }
-          }
-        }
       }
+    }
+  }
+}
 
-      console.log(
-        `📋 Employees with 60%×12% rule:`,
-        Array.from(specialPercentageEmployees).join(", ")
-      );
+console.log(
+  `📋 Loaded custom percentages for ${employeePercentageMap.size} employees`
+);
+
 
       // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
@@ -809,58 +802,67 @@ useEffect(() => {
       console.log(`✅ Gross Salary computed (Step-3 logic): ${grossSalaryData.size} employees`);
 
       // ========== CALCULATE REGISTER WITH NEW 60% RULE ==========
-      const comparison: any[] = [];
+// ========== CALCULATE REGISTER WITH VARIABLE PERCENTAGES ==========
+const comparison: any[] = [];
 
-      for (const [empId, empData] of grossSalaryData) {
-        const is12PercentEmployee = specialPercentageEmployees.has(empId);
-        const percentage = is12PercentEmployee ? SPECIAL_PERCENTAGE : DEFAULT_PERCENTAGE;
+for (const [empId, empData] of grossSalaryData) {
+  // Get the employee's specific percentage (default to 8.33% if not specified)
+  const employeePercentage = employeePercentageMap.get(empId) || DEFAULT_PERCENTAGE;
+  
+  // Determine if 60% gross adjustment should be applied
+  // Rule: Apply 60% adjustment ONLY for 12% employees
+  const shouldApplyGrossAdjustment = employeePercentage === SPECIAL_PERCENTAGE;
+  
+  let registerSoftware: number;
+  let adjustedGross: number;
+  
+  if (shouldApplyGrossAdjustment) {
+    // For 12% employees: (Gross × 60%) × 12%
+    adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
+    registerSoftware = (adjustedGross * employeePercentage) / 100;
+    
+    console.log(
+      `🎯 Emp ${empId}: ${employeePercentage}% with 60% adjustment | Gross=₹${empData.grossSalary.toFixed(2)} → 60%=₹${adjustedGross.toFixed(2)} → ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
+    );
+  } else {
+    // For all other percentages: Direct application on full gross
+    adjustedGross = empData.grossSalary;
+    registerSoftware = (empData.grossSalary * employeePercentage) / 100;
+    
+    console.log(
+      `📊 Emp ${empId}: ${employeePercentage}% on full gross | Gross=₹${empData.grossSalary.toFixed(2)} × ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
+    );
+  }
 
-        // *** NEW CALCULATION LOGIC ***
-        let registerSoftware: number;
-        
-        if (is12PercentEmployee) {
-          // For 12% employees: (Gross × 60%) × 12%
-          const adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
-          registerSoftware = (adjustedGross * SPECIAL_PERCENTAGE) / 100;
-          
-          console.log(
-            `🎯 Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(2)} → 60%=₹${adjustedGross.toFixed(2)} → 12%=₹${registerSoftware.toFixed(2)}`
-          );
-        } else {
-          // For 8.33% employees: Gross × 8.33%
-          registerSoftware = (empData.grossSalary * DEFAULT_PERCENTAGE) / 100;
-          
-          console.log(
-            `📊 Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(2)} × 8.33%=₹${registerSoftware.toFixed(2)}`
-          );
-        }
+  const hrData = hrRegisterData.get(empId);
+  const registerHR = hrData?.registerHR || 0;
+  const occurrences = hrData?.occurrences || 0;
 
-        const hrData = hrRegisterData.get(empId);
-        const registerHR = hrData?.registerHR || 0;
-        const occurrences = hrData?.occurrences || 0;
+  const difference = registerSoftware - registerHR;
+  const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
-        const difference = registerSoftware - registerHR;
-        const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+  comparison.push({
+    employeeId: empId,
+    employeeName: empData.name,
+    department: empData.dept,
+    grossSalarySoftware: empData.grossSalary,
+    adjustedGross: adjustedGross, // NEW: Show the adjusted gross used
+    percentage: employeePercentage, // NOW USES ACTUAL VALUE
+    appliedGrossAdjustment: shouldApplyGrossAdjustment, // NEW: Flag if 60% was applied
+    registerSoftware: registerSoftware,
+    registerHR: registerHR,
+    hrOccurrences: occurrences,
+    difference: difference,
+    status: status,
+  });
 
-        comparison.push({
-          employeeId: empId,
-          employeeName: empData.name,
-          department: empData.dept,
-          grossSalarySoftware: empData.grossSalary,
-          percentage: percentage,
-          registerSoftware: registerSoftware,
-          registerHR: registerHR,
-          hrOccurrences: occurrences,
-          difference: difference,
-          status: status,
-        });
+  if (occurrences > 1) {
+    console.log(
+      `🔄 Emp ${empId}: ${occurrences} HR entries summed to ₹${registerHR.toFixed(2)}`
+    );
+  }
+}
 
-        if (occurrences > 1) {
-          console.log(
-            `🔄 Emp ${empId}: ${occurrences} HR entries summed to ₹${registerHR.toFixed(2)}`
-          );
-        }
-      }
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
