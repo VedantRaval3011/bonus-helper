@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useFileContext } from "@/contexts/FileContext";
 import * as XLSX from "xlsx";
+import { useRef } from 'react';
 
 export default function Step3Page() {
   const router = useRouter();
@@ -116,6 +117,129 @@ export default function Step3Page() {
   const EMPLOYEE_START_MONTHS: Record<number, string> = {
     999: "2024-12",  // Hanshaben Parmar joined December 2024
   };
+
+  // === Step 3 Audit Helpers ===
+
+  function djb2Hash(str: string) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function buildRunKeyStep3(rows: any[]) {
+  // derive a compact signature from data that defines this run
+  const sig = rows
+    .map(r => `${r.employeeId}|${r.department}|${Number(r.grossSalarySoftware)||0}|${Number(r.grossSalaryHR)||0}|${Number(r.difference)||0}|${r.status}`)
+    .join(';');
+  return djb2Hash(sig);
+}
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;     // guard SSR
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep3(comparisonData);
+  const markerKey = `audit_step3_${runKey}`;
+
+  // prevent duplicate auto-saves on refresh/strict-mode remounts
+  if (sessionStorage.getItem(markerKey)) return;
+
+  sessionStorage.setItem(markerKey, '1');
+  // fire-and-forget; optionally capture batchId from your helper if needed
+  handleSaveAuditStep3(comparisonData).catch(err => {
+    console.error('Auto-audit step3 failed', err);
+    // clear marker so another attempt can occur on next refresh
+    sessionStorage.removeItem(markerKey);
+  });
+}, [comparisonData]);
+
+// POST helper (step at batch-level)
+async function postAuditMessagesStep3(items: any[], batchId?: string) {
+  const bid =
+    batchId ||
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: bid, step: 3, items }),
+  });
+  return bid;
+}
+
+// Build Step 3 mismatch messages from comparisonData
+function buildStep3MismatchMessages(rows: any[]) {
+  // rows: [{ employeeId, employeeName, department, grossSalarySoftware, grossSalaryHR, difference, status }]
+  const items: any[] = [];
+
+  for (const r of rows) {
+    if (r?.status === 'Mismatch') {
+      items.push({
+        level: 'error',
+        tag: 'mismatch',
+        text: `[step3] ${r.employeeId} ${r.employeeName} diff=${r.difference.toFixed?.(2) ?? r.difference}`,
+        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
+        source: 'step3',
+        meta: {
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          department: r.department,
+          softwareGross: r.grossSalarySoftware,
+          hrGross: r.grossSalaryHR,
+          diff: r.difference,
+          tolerance: TOLERANCE,
+        },
+      });
+    }
+  }
+  return items;
+}
+
+// Optional: one compact info summary for the run
+function buildStep3SummaryMessage(rows: any[]) {
+  const total = rows.length || 0;
+  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+  const matches = total - mismatches;
+
+  const staffRows = rows.filter((r) => r.department === 'Staff');
+  const workerRows = rows.filter((r) => r.department === 'Worker');
+
+  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
+  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
+
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const staffSoft = sum(staffRows.map((r) => Number(r.grossSalarySoftware || 0)));
+  const staffHR = sum(staffRows.map((r) => Number(r.grossSalaryHR || 0)));
+  const workerSoft = sum(workerRows.map((r) => Number(r.grossSalarySoftware || 0)));
+  const workerHR = sum(workerRows.map((r) => Number(r.grossSalaryHR || 0)));
+
+  return {
+    level: 'info',
+    tag: 'summary',
+    text: `Step3 run: total=${total} match=${matches} mismatch=${mismatches}`,
+    scope: 'global',
+    source: 'step3',
+    meta: {
+      totals: { total, matches, mismatches, tolerance: TOLERANCE },
+      staff: { count: staffRows.length, mismatches: staffMismatch, softwareGross: staffSoft, hrGross: staffHR },
+      worker: { count: workerRows.length, mismatches: workerMismatch, softwareGross: workerSoft, hrGross: workerHR },
+    },
+  };
+}
+
+// Click handler to save the audit
+async function handleSaveAuditStep3(rows: any[]) {
+  if (!rows || rows.length === 0) return; // nothing to do
+
+  const mismatchItems = buildStep3MismatchMessages(rows);
+  const items = [buildStep3SummaryMessage(rows), ...mismatchItems];
+
+  if (items.length === 0) return;
+
+  await postAuditMessagesStep3(items); // this uses step: 3 in body
+}
+
 
   const processFiles = async () => {
     if (!staffFile || !workerFile || !bonusFile) {

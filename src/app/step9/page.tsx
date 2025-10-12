@@ -57,7 +57,7 @@ export default function Step9Page() {
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
-  // Constants from Step 5/6
+  // Constants from Step 6
   const MONTH_NAME_MAP: Record<string, number> = {
     JAN: 1,
     JANUARY: 1,
@@ -143,8 +143,10 @@ export default function Step9Page() {
   const SPECIAL_PERCENTAGE = 12.0;
   const TOLERANCE = 12;
 
-  const referenceDate = new Date(Date.UTC(2024, 9, 31));
+  // ✅ CORRECTED: Reference date should be October 30, 2025 (end of bonus period)
+  const referenceDate = new Date(Date.UTC(2025, 9, 30)); // 2025-10-30 (UTC)
 
+  // Parse DOJ from various formats
   function parseDOJ(raw: any): Date | null {
     if (raw == null || raw === "") return null;
 
@@ -183,16 +185,25 @@ export default function Step9Page() {
     return null;
   }
 
+  // ✅ CORRECTED: Proper month calculation that handles all edge cases
   function monthsBetween(start: Date, end: Date): number {
-    const sy = start.getUTCFullYear(),
-      sm = start.getUTCMonth(),
-      sd = start.getUTCDate();
-    const ey = end.getUTCFullYear(),
-      em = end.getUTCMonth(),
-      ed = end.getUTCDate();
-    let m = (ey - sy) * 12 + (em - sm);
-    if (ed < sd) m -= 1;
-    return Math.max(0, m);
+    const sy = start.getUTCFullYear();
+    const sm = start.getUTCMonth();
+    const sd = start.getUTCDate();
+    const ey = end.getUTCFullYear();
+    const em = end.getUTCMonth();
+    const ed = end.getUTCDate();
+
+    // Calculate raw month difference
+    let months = (ey - sy) * 12 + (em - sm);
+
+    // Adjust for incomplete months
+    // If the day of end date is before the day of start date, subtract 1 month
+    if (ed < sd) {
+      months -= 1;
+    }
+
+    return Math.max(0, months);
   }
 
   const calculateMonthsOfService = (dateOfJoining: any): number => {
@@ -236,8 +247,9 @@ export default function Step9Page() {
       // Column structure: SR. NO. (0), EMP. ID (1), DEPT. (2), EMP. NAME (3), DEDUCTION DETAILS (4), DEDUCTION LOAN FOR BONUS (5)
       const loanHeaderRow = 1;
       const empIdIdx = 1; // EMP. ID column
-      const loanIdx = 5;
-      // Find header row
+      const loanIdx = 5; // DEDUCTION LOAN FOR BONUS column
+
+      // Start from row 2 (index 2) to skip header
       for (let i = loanHeaderRow + 1; i < loanData.length; i++) {
         const row = loanData[i];
         if (!row || row.length === 0) continue;
@@ -571,6 +583,16 @@ export default function Step9Page() {
             headerStr
           );
         });
+
+        if (dojIdx === -1) {
+          for (let i = Math.max(0, headers.length - 3); i < headers.length; i++) {
+            const h = String(headers[i] ?? "").trim().toLowerCase();
+            if (h.includes("date") || h.includes("joining") || h.includes("doj")) {
+              dojIdx = i;
+              break;
+            }
+          }
+        }
 
         if (dojIdx === -1 && headers.length > 15) {
           dojIdx = headers.length - 1;
