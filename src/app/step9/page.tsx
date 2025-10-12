@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useFileContext } from "@/contexts/FileContext";
 import * as XLSX from "xlsx";
 
-export default function Step6Page() {
+export default function Step9Page() {
   const router = useRouter();
   const { fileSlots } = useFileContext();
   const [comparisonData, setComparisonData] = useState<any[]>([]);
@@ -46,6 +46,10 @@ export default function Step6Page() {
     pickFile((s) => s.type === "Due-Voucher-List") ??
     pickFile((s) => !!s.file && /due.*voucher/i.test(s.file.name));
 
+  const loanDeductionFile =
+    pickFile((s) => s.type === "Loan-Deduction") ??
+    pickFile((s) => !!s.file && /loan.*deduction/i.test(s.file.name));
+
   // Helper to normalize header text
   const norm = (x: any) =>
     String(x ?? "")
@@ -53,92 +57,117 @@ export default function Step6Page() {
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
-  // Constants from Step 5
+  // Constants from Step 5/6
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1, JANUARY: 1,
-    FEB: 2, FEBRUARY: 2,
-    MAR: 3, MARCH: 3,
-    APR: 4, APRIL: 4,
+    JAN: 1,
+    JANUARY: 1,
+    FEB: 2,
+    FEBRUARY: 2,
+    MAR: 3,
+    MARCH: 3,
+    APR: 4,
+    APRIL: 4,
     MAY: 5,
-    JUN: 6, JUNE: 6,
-    JUL: 7, JULY: 7,
-    AUG: 8, AUGUST: 8,
-    SEP: 9, SEPT: 9, SEPTEMBER: 9,
-    OCT: 10, OCTOBER: 10,
-    NOV: 11, NOVEMBER: 11,
-    DEC: 12, DECEMBER: 12,
+    JUN: 6,
+    JUNE: 6,
+    JUL: 7,
+    JULY: 7,
+    AUG: 8,
+    AUGUST: 8,
+    SEP: 9,
+    SEPT: 9,
+    SEPTEMBER: 9,
+    OCT: 10,
+    OCTOBER: 10,
+    NOV: 11,
+    NOVEMBER: 11,
+    DEC: 12,
+    DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
   const parseMonthFromSheetName = (sheetName: string): string | null => {
-    const s = String(sheetName || "").trim().toUpperCase();
-    
+    const s = String(sheetName || "")
+      .trim()
+      .toUpperCase();
+
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
       const m = Number(yyyymm[2]);
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
-    
-    const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
+
+    const mon = s.match(
+      /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/
+    );
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
     );
     const y2or4 = s.match(/\b(20\d{2}|\d{2})\b/);
     const monthToken = (monthFull?.[1] || mon?.[1]) as string | undefined;
-    
+
     if (monthToken && y2or4) {
       let y = Number(y2or4[1]);
       if (y < 100) y += 2000;
       const m = MONTH_NAME_MAP[monthToken];
       if (m) return `${y}-${pad2(m)}`;
     }
-    
+
     return null;
   };
 
   const AVG_WINDOW: string[] = [
-    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
-    "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
+    "2024-11",
+    "2024-12",
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
   ];
 
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
   const EXCLUDED_DEPARTMENTS = ["C", "CASH", "A"];
 
   const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
-    937, 1039, 1065, 1105, 59, 161
+    937, 1039, 1065, 1105, 59, 161,
   ]);
 
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
   const TOLERANCE = 12;
 
-  // ✅ CORRECTED: Reference date should be october 31, 2025 (end of bonus period)
-  const referenceDate = new Date(Date.UTC(2025, 9, 30)); // 2025-10-31 (UTC)
+  const referenceDate = new Date(Date.UTC(2024, 9, 31));
 
-  // Parse DOJ from various formats
   function parseDOJ(raw: any): Date | null {
-    if (raw == null || raw === '') return null;
-    
-    if (typeof raw === 'number') {
+    if (raw == null || raw === "") return null;
+
+    if (typeof raw === "number") {
       const excelEpoch = Date.UTC(1899, 11, 30);
       return new Date(excelEpoch + raw * 86400000);
     }
-    
-    if (typeof raw === 'string') {
+
+    if (typeof raw === "string") {
       let s = raw.trim();
-      
+
       if (/\d{4}-\d{2}-\d{2}\s+\d/.test(s)) {
         s = s.split(/\s+/)[0];
       }
-      
-      s = s.replace(/[.\/]/g, '-');
+
+      s = s.replace(/[.\/]/g, "-");
 
       const m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
       if (m) {
         let [_, d, mo, y] = m;
-        let year = Number(y.length === 2 ? (Number(y) <= 29 ? '20' + y : '19' + y) : y);
+        let year = Number(
+          y.length === 2 ? (Number(y) <= 29 ? "20" + y : "19" + y) : y
+        );
         let month = Number(mo) - 1;
         let day = Number(d);
         const dt = new Date(Date.UTC(year, month, day));
@@ -146,50 +175,42 @@ export default function Step6Page() {
       }
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-        const dt = new Date(s + 'T00:00:00Z');
+        const dt = new Date(s + "T00:00:00Z");
         return isNaN(dt.getTime()) ? null : dt;
       }
     }
-    
+
     return null;
   }
 
-  // ✅ CORRECTED: Proper month calculation that handles all edge cases
   function monthsBetween(start: Date, end: Date): number {
-    const sy = start.getUTCFullYear();
-    const sm = start.getUTCMonth();
-    const sd = start.getUTCDate();
-    const ey = end.getUTCFullYear();
-    const em = end.getUTCMonth();
-    const ed = end.getUTCDate();
-    
-    // Calculate raw month difference
-    let months = (ey - sy) * 12 + (em - sm);
-    
-    // Adjust for incomplete months
-    // If the day of end date is before the day of start date, subtract 1 month
-    if (ed < sd) {
-      months -= 1;
-    }
-    
-    return Math.max(0, months);
+    const sy = start.getUTCFullYear(),
+      sm = start.getUTCMonth(),
+      sd = start.getUTCDate();
+    const ey = end.getUTCFullYear(),
+      em = end.getUTCMonth(),
+      ed = end.getUTCDate();
+    let m = (ey - sy) * 12 + (em - sm);
+    if (ed < sd) m -= 1;
+    return Math.max(0, m);
   }
 
   const calculateMonthsOfService = (dateOfJoining: any): number => {
     const doj = parseDOJ(dateOfJoining);
     if (!doj) return 0;
-    
-    const months = monthsBetween(doj, referenceDate);
-    
-    // Debug logging
-    console.log(`DOJ: ${doj.toISOString().split('T')[0]} → MOS: ${months} months (as of ${referenceDate.toISOString().split('T')[0]})`);
-    
-    return months;
+    return monthsBetween(doj, referenceDate);
   };
 
   const processFiles = async () => {
-    if (!staffFile || !workerFile || !bonusFile || !actualPercentageFile || !dueVoucherFile) {
-      setError("All five files are required for processing");
+    if (
+      !staffFile ||
+      !workerFile ||
+      !bonusFile ||
+      !actualPercentageFile ||
+      !dueVoucherFile ||
+      !loanDeductionFile
+    ) {
+      setError("All six files are required for processing");
       return;
     }
 
@@ -198,10 +219,39 @@ export default function Step6Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 6: Unpaid Verification)");
+      console.log("📊 STEP 9: Final RTGS Comparison");
       console.log("=".repeat(60));
-      console.log(`✅ CORRECTED Reference Date: ${referenceDate.toISOString().split('T')[0]} (Sep 30, 2025)`);
-      console.log(`Bonus Period: November 2024 - September 2025`);
+
+      // ========== LOAD LOAN DEDUCTION DATA ==========
+      const loanBuffer = await loanDeductionFile.arrayBuffer();
+      const loanWorkbook = XLSX.read(loanBuffer);
+      const loanSheet = loanWorkbook.Sheets[loanWorkbook.SheetNames[0]];
+      const loanData: any[][] = XLSX.utils.sheet_to_json(loanSheet, {
+        header: 1,
+      });
+
+      const loanMap: Map<number, number> = new Map();
+
+      // Header is at row 1 (index 1)
+      // Column structure: SR. NO. (0), EMP. ID (1), DEPT. (2), EMP. NAME (3), DEDUCTION DETAILS (4), DEDUCTION LOAN FOR BONUS (5)
+      const loanHeaderRow = 1;
+      const empIdIdx = 1; // EMP. ID column
+      const loanIdx = 5;
+      // Find header row
+      for (let i = loanHeaderRow + 1; i < loanData.length; i++) {
+        const row = loanData[i];
+        if (!row || row.length === 0) continue;
+
+        const empId = Number(row[empIdIdx]);
+        const loanAmount = Number(row[loanIdx]) || 0;
+
+        if (empId && !isNaN(empId) && loanAmount > 0) {
+          loanMap.set(empId, loanAmount);
+          console.log(`💰 Loan: Emp ${empId} = ₹${loanAmount}`);
+        }
+      }
+
+      console.log(`✅ Loan deduction data loaded: ${loanMap.size} employees`);
 
       // ========== LOAD ACTUAL PERCENTAGE DATA ==========
       const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
@@ -246,20 +296,30 @@ export default function Step6Page() {
             const empCode = Number(row[empCodeIdx]);
             const percentage = Number(row[percentageIdx]);
 
-            if (empCode && !isNaN(empCode) && percentage === SPECIAL_PERCENTAGE) {
+            if (
+              empCode &&
+              !isNaN(empCode) &&
+              percentage === SPECIAL_PERCENTAGE
+            ) {
               specialPercentageEmployees.add(empCode);
             }
           }
         }
       }
 
-      console.log(`✅ Special percentage employees: ${specialPercentageEmployees.size}`);
+      console.log(
+        `✅ Special percentage employees: ${specialPercentageEmployees.size}`
+      );
 
       // ========== LOAD DUE VOUCHER DATA ==========
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
       const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
-      const dueVoucherSheet = dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
-      const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(dueVoucherSheet, { header: 1 });
+      const dueVoucherSheet =
+        dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
+      const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(
+        dueVoucherSheet,
+        { header: 1 }
+      );
 
       const dueVCMap: Map<number, number> = new Map();
       let dueVCHeaderRow = -1;
@@ -303,168 +363,176 @@ export default function Step6Page() {
 
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
 
-      // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
+      // ========== LOAD BONUS FILE FOR FINAL RTGS (HR) - AGGREGATE ACROSS ALL SHEETS ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
-      const hrUnpaidData: Map<
-        number, 
-        { unpaidHR: number; registerHR: number; dept: string; occurrences: number }
+      const hrFinalRTGSData: Map<
+        number,
+        { finalRTGS: number; sheets: string[] }
       > = new Map();
 
-      // Process Worker sheet (1st sheet)
-      if (bonusWorkbook.SheetNames.length > 0) {
-        const workerSheetName = bonusWorkbook.SheetNames[0];
-        console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
-        const workerSheet = bonusWorkbook.Sheets[workerSheetName];
-        const workerData: any[][] = XLSX.utils.sheet_to_json(workerSheet, { header: 1 });
+      // Process all sheets except "Loan Ded."
+      for (const sheetName of bonusWorkbook.SheetNames) {
+        if (sheetName === "Loan Ded.") {
+          console.log(`⏭️ Skipping sheet: ${sheetName}`);
+          continue;
+        }
 
-        let workerHeaderRow = -1;
-        for (let i = 0; i < Math.min(10, workerData.length); i++) {
+        console.log(`📄 Processing Bonus sheet: ${sheetName}`);
+        const sheet = bonusWorkbook.Sheets[sheetName];
+        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+        });
+
+        let sheetHeaderRow = -1;
+        for (let i = 0; i < Math.min(10, sheetData.length); i++) {
           if (
-            workerData[i] &&
-            workerData[i].some((v: any) => {
+            sheetData[i] &&
+            sheetData[i].some((v: any) => {
               const t = norm(v);
               return t === "EMPCODE" || t === "EMPLOYEECODE";
             })
           ) {
-            workerHeaderRow = i;
+            sheetHeaderRow = i;
             break;
           }
         }
 
-        if (workerHeaderRow !== -1) {
-          const headers = workerData[workerHeaderRow];
-          const empCodeIdx = headers.findIndex((h: any) =>
-            ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
-          );
-          const registerIdx = 18; // Column S
-          
-          let dueVCIdx = headers.findIndex((h: any) => {
-            const headerStr = String(h ?? "").trim();
-            return /DUE\s*VC|DUEVC/i.test(headerStr);
-          });
-          
-          if (dueVCIdx === -1) {
-            dueVCIdx = 19; // Column T
-          }
-
-          for (let i = workerHeaderRow + 1; i < workerData.length; i++) {
-            const row = workerData[i];
-            if (!row || row.length === 0) continue;
-
-            const empCode = Number(row[empCodeIdx]);
-            const registerHR = Number(row[registerIdx]) || 0;
-            const unpaidHR = Number(row[dueVCIdx]) || 0;
-
-            if (empCode && !isNaN(empCode)) {
-              if (hrUnpaidData.has(empCode)) {
-                const existing = hrUnpaidData.get(empCode)!;
-                existing.registerHR += registerHR;
-                existing.unpaidHR += unpaidHR;
-                existing.occurrences += 1;
-                console.log(
-                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
-                );
-              } else {
-                hrUnpaidData.set(empCode, {
-                  registerHR: registerHR,
-                  unpaidHR: unpaidHR,
-                  dept: "Worker",
-                  occurrences: 1,
-                });
-              }
-            }
-          }
+        if (sheetHeaderRow === -1) {
+          console.log(`⚠️ No header found in ${sheetName}`);
+          continue;
         }
-      }
 
-      // Process Staff sheet (2nd sheet)
-      if (bonusWorkbook.SheetNames.length > 1) {
-        const staffSheetName = bonusWorkbook.SheetNames[1];
-        console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
-        const staffSheet = bonusWorkbook.Sheets[staffSheetName];
-        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, { header: 1 });
+        const headers = sheetData[sheetHeaderRow];
+        const empCodeIdx = headers.findIndex((h: any) =>
+          ["EMPCODE", "EMPLOYEECODE", "EMP CODE"].includes(
+            String(h ?? "")
+              .trim()
+              .toUpperCase()
+              .replace(/\s+/g, "")
+          )
+        );
 
-        let staffHeaderRow = -1;
-        for (let i = 0; i < Math.min(10, staffData.length); i++) {
+        // Find Final RTGS column - handle variations
+        const finalRTGSIdx = headers.findIndex((h: any) => {
+          const headerStr = String(h ?? "")
+            .trim()
+            .toUpperCase();
+          return (
+            headerStr === "FINAL RTGS" ||
+            headerStr === "FINALRTGS" ||
+            headerStr === "FINAL RTGS.1" ||
+            /FINAL.*RTGS/i.test(headerStr)
+          );
+        });
+
+        if (empCodeIdx === -1 || finalRTGSIdx === -1) {
+          console.log(
+            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, RTGS: ${finalRTGSIdx})`
+          );
+          continue;
+        }
+
+        console.log(
+          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Final RTGS at ${finalRTGSIdx}`
+        );
+
+        let recordsInSheet = 0;
+        for (let i = sheetHeaderRow + 1; i < sheetData.length; i++) {
+          const row = sheetData[i];
+          if (!row || row.length === 0) continue;
+
+          const empCodeRaw = row[empCodeIdx];
+          const finalRTGSRaw = row[finalRTGSIdx];
+
           if (
-            staffData[i] &&
-            staffData[i].some((v: any) => {
-              const t = norm(v);
-              return t === "EMPCODE" || t === "EMPLOYEECODE";
-            })
-          ) {
-            staffHeaderRow = i;
-            break;
+            empCodeRaw == null ||
+            empCodeRaw === "" ||
+            finalRTGSRaw == null ||
+            finalRTGSRaw === ""
+          )
+            continue;
+
+          const empCode = Number(empCodeRaw);
+          const finalRTGS = Number(finalRTGSRaw);
+
+          if (isNaN(empCode) || isNaN(finalRTGS)) continue;
+
+          recordsInSheet++;
+
+          if (!hrFinalRTGSData.has(empCode)) {
+            hrFinalRTGSData.set(empCode, {
+              finalRTGS: finalRTGS,
+              sheets: [sheetName],
+            });
+          } else {
+            const existing = hrFinalRTGSData.get(empCode)!;
+            existing.finalRTGS += finalRTGS;
+            existing.sheets.push(sheetName);
+            console.log(
+              `  🔄 Emp ${empCode}: Adding ₹${finalRTGS.toFixed(
+                2
+              )} from ${sheetName} (Total: ₹${existing.finalRTGS.toFixed(2)})`
+            );
           }
         }
 
-        if (staffHeaderRow !== -1) {
-          const headers = staffData[staffHeaderRow];
-          const empCodeIdx = headers.findIndex((h: any) =>
-            ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
-          );
-          const registerIdx = 19; // Column T
-          const unpaidIdx = 21; // Column V
-
-          for (let i = staffHeaderRow + 1; i < staffData.length; i++) {
-            const row = staffData[i];
-            if (!row || row.length === 0) continue;
-
-            const empCode = Number(row[empCodeIdx]);
-            const registerHR = Number(row[registerIdx]) || 0;
-            const unpaidHR = Number(row[unpaidIdx]) || 0;
-
-            if (empCode && !isNaN(empCode)) {
-              if (hrUnpaidData.has(empCode)) {
-                const existing = hrUnpaidData.get(empCode)!;
-                existing.registerHR += registerHR;
-                existing.unpaidHR += unpaidHR;
-                existing.occurrences += 1;
-                console.log(
-                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
-                );
-              } else {
-                hrUnpaidData.set(empCode, {
-                  registerHR: registerHR,
-                  unpaidHR: unpaidHR,
-                  dept: "Staff",
-                  occurrences: 1,
-                });
-              }
-            }
-          }
-        }
+        console.log(
+          `  ✅ Processed ${recordsInSheet} records from ${sheetName}`
+        );
       }
 
-      console.log(`✅ HR Unpaid data loaded: ${hrUnpaidData.size} employees`);
+      // Log employees that appear in multiple sheets
+      const multiSheetEmployees = Array.from(hrFinalRTGSData.entries()).filter(
+        ([_, data]) => data.sheets.length > 1
+      );
+      console.log(
+        `\n📊 Employees appearing in multiple sheets: ${multiSheetEmployees.length}`
+      );
+      multiSheetEmployees.forEach(([empId, data]) => {
+        console.log(
+          `  Emp ${empId}: ₹${data.finalRTGS.toFixed(
+            2
+          )} across [${data.sheets.join(", ")}]`
+        );
+      });
 
-      // ========== COMPUTE GROSS SALARY (EXACT STEP-5 LOGIC WITH OCTOBER ESTIMATION) ==========
-      
+      console.log(
+        `✅ HR Final RTGS data loaded: ${hrFinalRTGSData.size} employees`
+      );
+
+      // ========== COMPUTE GROSS SALARY ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
-      
+
       const staffEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+        {
+          name: string;
+          dept: string;
+          months: Map<string, number>;
+          dateOfJoining: any;
+        }
       > = new Map();
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Staff: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Staff: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -499,18 +567,10 @@ export default function Step6Page() {
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+            headerStr
+          );
         });
-
-        if (dojIdx === -1) {
-          for (let i = Math.max(0, headers.length - 3); i < headers.length; i++) {
-            const h = String(headers[i] ?? "").trim().toLowerCase();
-            if (h.includes("date") || h.includes("joining") || h.includes("doj")) {
-              dojIdx = i;
-              break;
-            }
-          }
-        }
 
         if (dojIdx === -1 && headers.length > 15) {
           dojIdx = headers.length - 1;
@@ -523,9 +583,11 @@ export default function Step6Page() {
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
-          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
+          const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -547,27 +609,34 @@ export default function Step6Page() {
 
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
-      
+
       const workerEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+        {
+          name: string;
+          dept: string;
+          months: Map<string, number>;
+          dateOfJoining: any;
+        }
       > = new Map();
 
       for (let sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Worker: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Worker: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -588,17 +657,23 @@ export default function Step6Page() {
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-        
+
         const deptIdx = headers.findIndex((h: any) => {
           const normalized = norm(h);
-          return normalized === "DEPT" || normalized === "DEPARTMENT" || normalized === "DEPTT";
+          return (
+            normalized === "DEPT" ||
+            normalized === "DEPARTMENT" ||
+            normalized === "DEPTT"
+          );
         });
-        
-        const salary1Idx = 8; // Column I
+
+        const salary1Idx = 8;
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+            headerStr
+          );
         });
 
         if (dojIdx === -1 && headers.length > 15) {
@@ -612,12 +687,16 @@ export default function Step6Page() {
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
           const salary1 = Number(row[salary1Idx]) || 0;
-          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
+          const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (deptIdx !== -1) {
-            const dept = String(row[deptIdx] || "").trim().toUpperCase();
+            const dept = String(row[deptIdx] || "")
+              .trim()
+              .toUpperCase();
             if (EXCLUDED_DEPARTMENTS.includes(dept)) {
               continue;
             }
@@ -650,13 +729,18 @@ export default function Step6Page() {
       const foldMonthly = (
         src: Map<
           number,
-          { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+          {
+            name: string;
+            dept: string;
+            months: Map<string, number>;
+            dateOfJoining: any;
+          }
         >
       ) => {
         for (const [empId, rec] of src) {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
-          
+
           for (const mk of AVG_WINDOW) {
             const v = rec.months.get(mk);
             if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
@@ -667,15 +751,18 @@ export default function Step6Page() {
 
           let estOct = 0;
           let total = baseSum;
-          const hasSep2025 = rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
+          const hasSep2025 =
+            rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
 
           if (isExcluded) {
             console.log(
-              `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
+              `🚫 EMP ${empId} (${
+                rec.name
+              }): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
-            const values = monthsIncluded.map(m => m.value);
+            const values = monthsIncluded.map((m) => m.value);
             estOct = values.reduce((a, b) => a + b, 0) / values.length;
             total = baseSum + estOct;
           }
@@ -698,7 +785,7 @@ export default function Step6Page() {
 
       console.log(`✅ Employee data loaded: ${employeeData.size} employees`);
 
-      // ========== CALCULATE UNPAID WITH CORRECTED MOS ==========
+      // ========== CALCULATE FINAL RTGS ==========
       const comparison: any[] = [];
 
       for (const [empId, empData] of employeeData) {
@@ -706,6 +793,8 @@ export default function Step6Page() {
           ? SPECIAL_PERCENTAGE
           : DEFAULT_PERCENTAGE;
 
+        // Register = Gross Salary * Percentage / 100
+        // This matches Step 6 exactly
         const registerSoftware = (empData.grossSalary * percentage) / 100;
 
         const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
@@ -721,19 +810,20 @@ export default function Step6Page() {
           unpaidSoftware = registerSoftware;
         }
 
-        const hrData = hrUnpaidData.get(empId);
-        const registerHR = hrData?.registerHR || 0;
-        const unpaidHR = hrData?.unpaidHR || 0;
-        const occurrences = hrData?.occurrences || 0;
+        // Get loan deduction
+        const loanDeduction = loanMap.get(empId) || 0;
 
-        const difference = unpaidSoftware - unpaidHR;
-        let status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+        // Calculate Final RTGS (Software) = Register - Unpaid - Loan
+        const finalRTGSSoftware =
+          registerSoftware - unpaidSoftware - loanDeduction;
 
-        let validationError = "";
-        if (!isEligible && Math.abs(unpaidSoftware - registerSoftware) > TOLERANCE) {
-          validationError = "Employee is not eligible, so their Unpaid value must be equal to the Register.";
-          status = "Error";
-        }
+        // Get Final RTGS from HR (aggregated across all sheets)
+        const hrData = hrFinalRTGSData.get(empId);
+        const finalRTGSHR = hrData?.finalRTGS || 0;
+        const hrSheets = hrData?.sheets || [];
+
+        const difference = finalRTGSSoftware - finalRTGSHR;
+        const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
         comparison.push({
           employeeId: empId,
@@ -744,23 +834,37 @@ export default function Step6Page() {
           percentage: percentage,
           grossSalarySoftware: empData.grossSalary,
           registerSoftware: registerSoftware,
-          registerHR: registerHR,
           unpaidSoftware: unpaidSoftware,
-          unpaidHR: unpaidHR,
-          hrOccurrences: occurrences,
+          loanDeduction: loanDeduction,
+          finalRTGSSoftware: finalRTGSSoftware,
+          finalRTGSHR: finalRTGSHR,
+          hrSheets: hrSheets,
           difference: difference,
           status: status,
-          validationError: validationError,
         });
+
+        console.log(
+          `Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(
+            2
+          )}, %=${percentage}, Register=₹${registerSoftware.toFixed(
+            2
+          )}, Unpaid=₹${unpaidSoftware.toFixed(
+            2
+          )}, Loan=₹${loanDeduction.toFixed(
+            2
+          )}, Final RTGS (SW)=₹${finalRTGSSoftware.toFixed(
+            2
+          )}, Final RTGS (HR)=₹${finalRTGSHR.toFixed(2)} [${hrSheets.join(
+            ", "
+          )}]`
+        );
       }
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-
-     
-
+      console.log("✅ Final RTGS comparison completed");
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -770,11 +874,25 @@ export default function Step6Page() {
   };
 
   useEffect(() => {
-    if (staffFile && workerFile && bonusFile && actualPercentageFile && dueVoucherFile) {
+    if (
+      staffFile &&
+      workerFile &&
+      bonusFile &&
+      actualPercentageFile &&
+      dueVoucherFile &&
+      loanDeductionFile
+    ) {
       processFiles();
     }
     // eslint-disable-next-line
-  }, [staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile]);
+  }, [
+    staffFile,
+    workerFile,
+    bonusFile,
+    actualPercentageFile,
+    dueVoucherFile,
+    loanDeductionFile,
+  ]);
 
   useEffect(() => {
     let filtered = comparisonData;
@@ -803,33 +921,37 @@ export default function Step6Page() {
   };
 
   const exportToExcel = () => {
-    const dataToExport = departmentFilter === "All" && eligibilityFilter === "All"
-      ? comparisonData
-      : filteredData;
+    const dataToExport =
+      departmentFilter === "All" && eligibilityFilter === "All"
+        ? comparisonData
+        : filteredData;
 
     const ws = XLSX.utils.json_to_sheet(
       dataToExport.map((row) => ({
-        "Employee ID": row.employeeId,
-        "Employee Name": row.employeeName,
-        Department: row.department,
-        "Months of Service": row.monthsOfService,
-        "Eligible": row.isEligible ? "YES" : "NO",
-        "Percentage (%)": row.percentage,
-        "Gross Salary (Software)": row.grossSalarySoftware,
-        "Register (Software)": row.registerSoftware,
-        "Register (HR)": row.registerHR,
-        "HR Occurrences": row.hrOccurrences,
-        "Unpaid (Software)": row.unpaidSoftware,
-        "Unpaid (HR)": row.unpaidHR,
+        "Emp ID": row.employeeId,
+        Name: row.employeeName,
+        Dept: row.department,
+        MOS: row.monthsOfService,
+        Eligible: row.isEligible ? "YES" : "NO",
+        "%": row.percentage,
+        Gross: row.grossSalarySoftware,
+        Register: row.registerSoftware,
+        Unpaid: row.unpaidSoftware,
+        Loan: row.loanDeduction,
+        "Final RTGS (Software)": row.finalRTGSSoftware,
+        "Final RTGS (HR)": row.finalRTGSHR,
+        "HR Sheets": row.hrSheets.join(", "),
         Difference: row.difference,
         Status: row.status,
-        "Validation Error": row.validationError || "",
       }))
     );
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Unpaid Verification");
-    XLSX.writeFile(wb, `Step6-Unpaid-Verification-CORRECTED-${departmentFilter}-${eligibilityFilter}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Final RTGS Comparison");
+    XLSX.writeFile(
+      wb,
+      `Step9-Final-RTGS-Comparison-${departmentFilter}-${eligibilityFilter}.xlsx`
+    );
   };
 
   const FileCard = ({
@@ -904,13 +1026,21 @@ export default function Step6Page() {
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
-            
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">
+                Step 9 - Final RTGS Comparison
+              </h1>
+              <p className="text-gray-600 mt-2">
+                Final RTGS = Register - Unpaid - Loan (HR values aggregated
+                across all sheets)
+              </p>
+            </div>
             <div className="flex gap-3">
               <button
-                onClick={() => router.push("/step5")}
+                onClick={() => router.push("/step6")}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
               >
-                ← Back to Step 5
+                ← Back to Step 6
               </button>
               <button
                 onClick={() => router.push("/")}
@@ -918,16 +1048,42 @@ export default function Step6Page() {
               >
                 Back to Step 1
               </button>
-              <button
-                onClick={() => router.push("/step7")}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-green-700 transition"
-              >
-                Move to Step 7
-              </button>
             </div>
           </div>
 
-          
+          {/* Info Box */}
+          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              Calculation Formula
+            </h3>
+            <div className="text-sm text-blue-800 space-y-2">
+              <p>
+                <strong>Final RTGS (Software):</strong> Register - Unpaid - Loan
+              </p>
+              <p>
+                <strong>Final RTGS (HR):</strong> Sum of all Final RTGS values
+                across all sheets (Worker, Staff, Sci Prec-, NRTM, Sci Prec
+                Life.-, Nutra-)
+              </p>
+              <p className="text-xs text-blue-600 mt-2">
+                ⚠️ Note: Employees may appear in multiple HR sheets. Their Final
+                RTGS values are aggregated (summed) before comparison.
+              </p>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
@@ -943,7 +1099,7 @@ export default function Step6Page() {
             <FileCard
               title="Bonus Calculation Sheet"
               file={bonusFile}
-              description="Register & Unpaid (HR): Worker Col T, Staff Col V"
+              description="Final RTGS (HR) values - aggregated across sheets"
             />
             <FileCard
               title="Actual Percentage Data"
@@ -953,13 +1109,23 @@ export default function Step6Page() {
             <FileCard
               title="Due Voucher List"
               file={dueVoucherFile}
-              description="DUE VC values for Unpaid (Software)"
+              description="Unpaid (DUE VC) values"
+            />
+            <FileCard
+              title="Loan Deduction"
+              file={loanDeductionFile}
+              description="Loan deduction amounts"
             />
           </div>
 
-          {[staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile].filter(
-            Boolean
-          ).length < 5 && (
+          {[
+            staffFile,
+            workerFile,
+            bonusFile,
+            actualPercentageFile,
+            dueVoucherFile,
+            loanDeductionFile,
+          ].filter(Boolean).length < 6 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <svg
@@ -992,7 +1158,7 @@ export default function Step6Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing with corrected MOS calculation (Sep 30, 2025)...
+                  Processing Final RTGS calculations...
                 </p>
               </div>
             </div>
@@ -1024,7 +1190,7 @@ export default function Step6Page() {
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-bold text-gray-800">
-                    Unpaid Verification Results (CORRECTED MOS)
+                    Final RTGS Comparison Results
                   </h2>
                   <select
                     value={departmentFilter}
@@ -1066,50 +1232,53 @@ export default function Step6Page() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[80vh]">
                 <table className="w-full border-collapse text-sm">
-                  <thead>
+                  <thead className="sticky">
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 px-3 py-2 text-left">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-left bg-gray-100">
                         Emp ID
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-left">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-left bg-gray-100">
                         Name
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-left">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-left bg-gray-100">
                         Dept
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
                         MOS
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
                         Eligible
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
                         %
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Gross (SW)
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Gross
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Register (SW)
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Register
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Register (HR)
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Unpaid
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        HR Entries
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Loan
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Unpaid (SW)
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Final RTGS (SW)
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Unpaid (HR)
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
+                        Final RTGS (HR)
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
+                        HR Sheets
+                      </th>
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
                         Diff
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
+                      <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
                         Status
                       </th>
                     </tr>
@@ -1120,15 +1289,10 @@ export default function Step6Page() {
                         key={idx}
                         className={`${
                           idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                        } ${row.validationError ? "bg-red-50" : ""} ${
-                          row.hrOccurrences > 1 ? "bg-yellow-50" : ""
-                        } ${row.employeeId === 922 ? "bg-green-100 font-bold" : ""}`}
+                        }`}
                       >
                         <td className="border border-gray-300 px-3 py-2">
                           {row.employeeId}
-                          {row.employeeId === 922 && (
-                            <span className="ml-1 text-xs text-green-700">✅</span>
-                          )}
                         </td>
                         <td className="border border-gray-300 px-3 py-2">
                           {row.employeeName}
@@ -1176,24 +1340,30 @@ export default function Step6Page() {
                           {formatCurrency(row.registerSoftware)}
                         </td>
                         <td className="border border-gray-300 px-3 py-2 text-right">
-                          {formatCurrency(row.registerHR)}
+                          {formatCurrency(row.unpaidSoftware)}
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-orange-600">
+                          {formatCurrency(row.loanDeduction)}
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right font-bold text-blue-600">
+                          {formatCurrency(row.finalRTGSSoftware)}
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-right font-bold text-purple-600">
+                          {formatCurrency(row.finalRTGSHR)}
                         </td>
                         <td className="border border-gray-300 px-3 py-2 text-center">
                           <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              row.hrOccurrences > 1
-                                ? "bg-orange-100 text-orange-800"
-                                : "bg-gray-100 text-gray-800"
+                            className={`text-xs ${
+                              row.hrSheets.length > 1
+                                ? "font-bold text-orange-600"
+                                : "text-gray-600"
                             }`}
+                            title={row.hrSheets.join(", ")}
                           >
-                            {row.hrOccurrences}
+                            {row.hrSheets.length > 1
+                              ? `${row.hrSheets.length} sheets`
+                              : row.hrSheets[0] || "N/A"}
                           </span>
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
-                          {formatCurrency(row.unpaidSoftware)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
-                          {formatCurrency(row.unpaidHR)}
                         </td>
                         <td
                           className={`border border-gray-300 px-3 py-2 text-right font-medium ${
@@ -1209,11 +1379,8 @@ export default function Step6Page() {
                             className={`px-3 py-1 rounded-full text-xs font-medium ${
                               row.status === "Match"
                                 ? "bg-green-100 text-green-800"
-                                : row.status === "Error"
-                                ? "bg-red-100 text-red-800"
                                 : "bg-orange-100 text-orange-800"
                             }`}
-                            title={row.validationError || ""}
                           >
                             {row.status}
                           </span>
@@ -1224,24 +1391,6 @@ export default function Step6Page() {
                 </table>
               </div>
 
-              {filteredData.some((r) => r.validationError) && (
-                <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-                  <h3 className="font-medium text-red-800 mb-2">
-                    ⚠️ Validation Errors Found
-                  </h3>
-                  <div className="text-sm text-red-700 space-y-1">
-                    {filteredData
-                      .filter((r) => r.validationError)
-                      .map((row) => (
-                        <p key={row.employeeId}>
-                          <strong>Emp {row.employeeId} ({row.employeeName}):</strong>{" "}
-                          {row.validationError}
-                        </p>
-                      ))}
-                  </div>
-                </div>
-              )}
-
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>
                   Total: {filteredData.length} | Staff:{" "}
@@ -1250,20 +1399,10 @@ export default function Step6Page() {
                   {filteredData.filter((r) => r.department === "Worker").length}
                 </div>
                 <div>
-                  Eligible:{" "}
-                  {filteredData.filter((r) => r.isEligible).length} |
-                  Not Eligible:{" "}
-                  {filteredData.filter((r) => !r.isEligible).length}
-                </div>
-                <div>
                   Matches:{" "}
                   {filteredData.filter((r) => r.status === "Match").length} |
                   Mismatches:{" "}
-                  {filteredData.filter((r) => r.status === "Mismatch").length} |
-                  Errors:{" "}
-                  {filteredData.filter((r) => r.status === "Error").length} |
-                  Duplicates:{" "}
-                  {filteredData.filter((r) => r.hrOccurrences > 1).length}
+                  {filteredData.filter((r) => r.status === "Mismatch").length}
                 </div>
               </div>
             </div>

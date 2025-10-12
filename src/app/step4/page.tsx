@@ -138,12 +138,10 @@ export default function Step4Page() {
     }
 
     // Check if date is valid
-    if (isNaN(doj.getTime())) {
-      return 0;
-    }
+    if (isNaN(doj.getTime())) return 0;
 
-    // Calculate to 30th Sept 2025
-    const referenceDate = new Date(2025, 9, 30);
+    // Calculate to 30th Oct 2025
+    const referenceDate = new Date(2025, 8, 30); // FIXED: Month is 0-indexed, so 9 = October
 
     // Calculate the difference in years and months
     const yearsDiff = referenceDate.getFullYear() - doj.getFullYear();
@@ -153,8 +151,8 @@ export default function Step4Page() {
     // Calculate total months
     let totalMonths = yearsDiff * 12 + monthsDiff;
 
-    // If the day of the reference date is before the day of joining, subtract one month
-    // because a full month hasn't been completed yet
+    // If the day of the reference date is before the day of joining,
+    // subtract one month because a full month hasn't been completed yet
     if (daysDiff < 0) {
       totalMonths--;
     }
@@ -165,11 +163,11 @@ export default function Step4Page() {
 
     // Apply percentage rules based on months of service
     if (totalMonths < 12) {
-      return 10; // Less than 1 year = 10%
+      return 10; // Less than 1 year → 10%
     } else if (totalMonths >= 12 && totalMonths < 24) {
-      return 12; // 1 year to less than 2 years = 12%
+      return 12; // 1 year to less than 2 years → 12%
     } else {
-      return 8.33; // 2 years or more = 8.33%
+      return 8.33; // 2 years or more → 8.33%
     }
   };
 
@@ -304,106 +302,108 @@ export default function Step4Page() {
 
       // In processFiles function, around line 670-730 where Staff file is processed:
 
-for (let sheetName of staffWorkbook.SheetNames) {
-  const sheet = staffWorkbook.Sheets[sheetName];
-  const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-  const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+      for (let sheetName of staffWorkbook.SheetNames) {
+        const sheet = staffWorkbook.Sheets[sheetName];
+        const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
-  console.log(`Staff sheet: ${sheetName} → monthKey: ${monthKey}`);
+        console.log(`Staff sheet: ${sheetName} → monthKey: ${monthKey}`);
 
-  let headerIdx = -1;
-  for (let i = 0; i < Math.min(15, data.length); i++) {
-    if (
-      data[i] &&
-      data[i].some((v: any) => {
-        const t = norm(v);
-        return t === "EMPID" || t === "EMPCODE";
-      })
-    ) {
-      headerIdx = i;
-      break;
-    }
-  }
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(15, data.length); i++) {
+          if (
+            data[i] &&
+            data[i].some((v: any) => {
+              const t = norm(v);
+              return t === "EMPID" || t === "EMPCODE";
+            })
+          ) {
+            headerIdx = i;
+            break;
+          }
+        }
 
-  if (headerIdx === -1) continue;
+        if (headerIdx === -1) continue;
 
-  const headers = data[headerIdx];
-  const empIdIdx = headers.findIndex((h: any) =>
-    ["EMPID", "EMPCODE"].includes(norm(h))
-  );
-  const empNameIdx = headers.findIndex((h: any) =>
-    /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
-  );
-  const salary1Idx = headers.findIndex(
-    (h: any) =>
-      /SALARY-?1/i.test(String(h ?? "")) || norm(h) === "SALARY1"
-  );
-  const dojIdx = headers.findIndex((h: any) =>
-    /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE/i.test(String(h ?? ""))
-  );
+        const headers = data[headerIdx];
+        const empIdIdx = headers.findIndex((h: any) =>
+          ["EMPID", "EMPCODE"].includes(norm(h))
+        );
+        const empNameIdx = headers.findIndex((h: any) =>
+          /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
+        );
+        const salary1Idx = headers.findIndex(
+          (h: any) =>
+            /SALARY-?1/i.test(String(h ?? "")) || norm(h) === "SALARY1"
+        );
+        const dojIdx = headers.findIndex((h: any) =>
+          /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE/i.test(String(h ?? ""))
+        );
 
-  // **ADD THIS DEBUG LOG**
-  console.log(`📋 Sheet: ${sheetName}`);
-  console.log(`  Headers found at row ${headerIdx}`);
-  console.log(`  EMP ID column index: ${empIdIdx}`);
-  console.log(`  Name column index: ${empNameIdx}`);
-  console.log(`  SALARY1 column index: ${salary1Idx}`);
-  console.log(`  DOJ column index: ${dojIdx}`); // ← Check if this is -1
-  if (dojIdx !== -1) {
-    console.log(`  DOJ column header: "${headers[dojIdx]}"`);
-  } else {
-    console.warn(`  ⚠️ DOJ column NOT FOUND in sheet ${sheetName}`);
-  }
+        // **ADD THIS DEBUG LOG**
+        console.log(`📋 Sheet: ${sheetName}`);
+        console.log(`  Headers found at row ${headerIdx}`);
+        console.log(`  EMP ID column index: ${empIdIdx}`);
+        console.log(`  Name column index: ${empNameIdx}`);
+        console.log(`  SALARY1 column index: ${salary1Idx}`);
+        console.log(`  DOJ column index: ${dojIdx}`); // ← Check if this is -1
+        if (dojIdx !== -1) {
+          console.log(`  DOJ column header: "${headers[dojIdx]}"`);
+        } else {
+          console.warn(`  ⚠️ DOJ column NOT FOUND in sheet ${sheetName}`);
+        }
 
-  if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
-    console.log(
-      `Skipping staff sheet ${sheetName}: missing required columns`
-    );
-    continue;
-  }
+        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
+          console.log(
+            `Skipping staff sheet ${sheetName}: missing required columns`
+          );
+          continue;
+        }
 
-  for (let i = headerIdx + 1; i < data.length; i++) {
-    const row = data[i];
-    if (!row || row.length === 0) continue;
+        for (let i = headerIdx + 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row || row.length === 0) continue;
 
-    const empId = Number(row[empIdIdx]);
-    const empName = String(row[empNameIdx] || "")
-      .trim()
-      .toUpperCase();
-    const salary1 = Number(row[salary1Idx]) || 0;
-    const doj = dojIdx !== -1 ? row[dojIdx] : null;
+          const empId = Number(row[empIdIdx]);
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
+          const salary1 = Number(row[salary1Idx]) || 0;
+          const doj = dojIdx !== -1 ? row[dojIdx] : null;
 
-    if (!empId || isNaN(empId) || !empName) continue;
+          if (!empId || isNaN(empId) || !empName) continue;
 
-    // **ADD THIS DEBUG LOG FOR EMPLOYEE 554**
-    if (empId === 554) {
-      console.log(`🔍 FOUND EMPLOYEE 554 in sheet ${sheetName}:`);
-      console.log(`  Name: ${empName}`);
-      console.log(`  DOJ raw value: ${doj}`);
-      console.log(`  DOJ type: ${typeof doj}`);
-      console.log(`  DOJ index: ${dojIdx}`);
-    }
+          // **ADD THIS DEBUG LOG FOR EMPLOYEE 554**
+          if (empId === 554) {
+            console.log(`🔍 FOUND EMPLOYEE 554 in sheet ${sheetName}:`);
+            console.log(`  Name: ${empName}`);
+            console.log(`  DOJ raw value: ${doj}`);
+            console.log(`  DOJ type: ${typeof doj}`);
+            console.log(`  DOJ index: ${dojIdx}`);
+          }
 
-    if (!staffEmployees.has(empId)) {
-      staffEmployees.set(empId, {
-        name: empName,
-        dept: "Staff",
-        dateOfJoining: doj,
-        months: new Map(),
-      });
-    } else {
-      // **CRITICAL FIX**: If DOJ already exists, don't overwrite it with null
-      const existingEmp = staffEmployees.get(empId)!;
-      if (!existingEmp.dateOfJoining && doj) {
-        existingEmp.dateOfJoining = doj;
-        console.log(`Updated DOJ for employee ${empId} from sheet ${sheetName}`);
+          if (!staffEmployees.has(empId)) {
+            staffEmployees.set(empId, {
+              name: empName,
+              dept: "Staff",
+              dateOfJoining: doj,
+              months: new Map(),
+            });
+          } else {
+            // **CRITICAL FIX**: If DOJ already exists, don't overwrite it with null
+            const existingEmp = staffEmployees.get(empId)!;
+            if (!existingEmp.dateOfJoining && doj) {
+              existingEmp.dateOfJoining = doj;
+              console.log(
+                `Updated DOJ for employee ${empId} from sheet ${sheetName}`
+              );
+            }
+          }
+
+          const emp = staffEmployees.get(empId)!;
+          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+        }
       }
-    }
-
-    const emp = staffEmployees.get(empId)!;
-    emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
-  }
-}
 
       console.log(`Total staff employees: ${staffEmployees.size}`);
 

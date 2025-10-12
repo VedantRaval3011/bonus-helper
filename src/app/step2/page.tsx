@@ -70,6 +70,131 @@ export default function Step2Page() {
     null
   );
 
+  // In your Step2 component file
+// 1) helper to post messages
+async function postAuditMessages(items: any[], batchId?: string, step?: number) {
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId, step, items }),
+  });
+}
+// 2) build metric snapshots (A,B,C,D,E) for all months from reportData
+function buildMetricSnapshotMessages(reportData: ReportData) {
+  // Expecting rows: Software, HR, A,N,C (extras), diff
+  const software = reportData.departments.find((d) => d.name === 'Software')?.data || {};
+  const hr = reportData.departments.find((d) => d.name === 'HR')?.data || {};
+  const extras = reportData.departments.find((d) => d.name === 'A,N,C')?.data || {};
+  const diff = reportData.departments.find((d) => d.name === 'diff')?.data || {};
+
+  const metrics = ['A', 'B', 'C', 'D', 'E'] as const;
+
+  const items = [];
+  for (const m of reportData.months) {
+    const snapshot: Record<string, any> = {};
+    for (const k of metrics) {
+      snapshot[k] = {
+        software: software[m]?.[k] ?? null,
+        hr: hr[m]?.[k] ?? null,
+        diff: diff[m]?.[k] ?? null,
+        extras: k === 'B' ? extras[m]?.[k] ?? null : null, // only B has extras
+      };
+    }
+    items.push({
+      level: 'info',
+      tag: 'metric-snapshot',
+      text: `Metric snapshot for ${m}`,
+      scope: 'global',
+      source: 'step2',
+      meta: { month: m, snapshot },
+    });
+  }
+  return items;
+}
+
+// 3) build mismatch messages (only if comparisonResults is present)
+function buildMismatchMessages(comparisonResults: ComparisonResults | null) {
+  if (!comparisonResults) return [];
+  const months = generateMonthHeaders(); // you already have this helper
+
+  const items: any[] = [];
+  const buildFor = (list: EmployeeComparison[], scope: 'staff' | 'worker') => {
+    for (const emp of list) {
+      // missing in HR / missing in Actual
+      if (emp.missingInHR) {
+        items.push({
+          level: 'warning',
+          tag: 'missing-in-hr',
+          text: `Missing in HR: ${emp.employeeCode} ${emp.name} (${emp.department})`,
+          scope,
+          source: 'step2',
+          meta: { employeeCode: emp.employeeCode, name: emp.name, department: emp.department },
+        });
+      }
+      if (emp.missingInActual) {
+        items.push({
+          level: 'warning',
+          tag: 'missing-in-actual',
+          text: `Missing in Actual: ${emp.employeeCode} ${emp.name} (${emp.department})`,
+          scope,
+          source: 'step2',
+          meta: { employeeCode: emp.employeeCode, name: emp.name, department: emp.department },
+        });
+      }
+
+      // per-month mismatches (abs diff >= 1) excluding ignorable months
+      for (const m of months) {
+        const actual = emp.actualSalaries[m] ?? 0;
+        const hr = emp.hrSalaries[m] ?? 0;
+        const diff = actual - hr;
+        const hasDiff = Math.abs(diff) >= 1;
+        const monthDept = emp.monthlyDepartments?.[m] || emp.department;
+        const shouldIgnore =
+          (monthDept || '').toString().toUpperCase() === 'C' ||
+          (monthDept || '').toString().toUpperCase() === 'A' ||
+          (emp.employeeCode || '').toString().toUpperCase() === 'N';
+
+        if (hasDiff && !shouldIgnore) {
+          items.push({
+            level: 'error',
+            tag: 'mismatch',
+            text: `[${scope}] ${emp.employeeCode} ${emp.name} ${m} diff=${diff} (actual=${actual}, hr=${hr})`,
+            scope,
+            source: 'step2',
+            meta: {
+              employeeCode: emp.employeeCode,
+              name: emp.name,
+              department: emp.department,
+              month: m,
+              actual,
+              hr,
+              diff,
+            },
+          });
+        }
+      }
+    }
+  };
+
+  buildFor(comparisonResults.staffComparisons, 'staff');
+  buildFor(comparisonResults.workerComparisons, 'worker');
+  return items;
+}
+
+async function storeAuditForGenerateReport(
+  reportData: ReportData,
+  comparisonResults: ComparisonResults | null
+) {
+  const batchId = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+  const items = [
+    ...buildMetricSnapshotMessages(reportData),
+    ...buildMismatchMessages(comparisonResults),
+  ];
+  if (items.length > 0) {
+    await postAuditMessages(items, batchId, 2); // step 2
+  }
+}
+
   const calculateMonthlyDifferences = (): {
     canProceed: boolean;
     monthlyStats: Record<string, { totalDiff: number; employeeCount: number }>;
@@ -490,32 +615,6 @@ const getCellNumericValue = (
     return sum;
   };
 
-  const extractAverageSheetEmployeeIds = (
-    actualPercentageWb: ExcelJS.Workbook
-  ): Set<string> => {
-    const employeeIds = new Set<string>();
-    const ws = actualPercentageWb.getWorksheet("Average");
-
-    if (!ws) {
-      console.log("Average sheet not found");
-      return employeeIds;
-    }
-
-    // Header is in row 1, data starts from row 2
-    const empCodeCol = 2; // Column B
-
-    for (let r = 2; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r);
-      const empCode = row.getCell(empCodeCol).value?.toString().trim();
-
-      if (empCode && empCode !== "") {
-        employeeIds.add(empCode);
-      }
-    }
-
-    console.log(`Found ${employeeIds.size} employee IDs in Average sheet`);
-    return employeeIds;
-  };
 
   const readStaffSalary1Total = (ws: ExcelJS.Worksheet): number => {
     const header3 = ws.getRow(3);
@@ -536,89 +635,6 @@ const getCellNumericValue = (
     const totalRow = findRowByLabel(ws, (t) => t.includes("TOTAL"));
     if (totalRow > 0) return num(ws.getRow(totalRow).getCell(col));
     return 0;
-  };
-
-  const getBonusOctoberTotals = (
-    bonusWb: ExcelJS.Workbook
-  ): { worker: number; staff: number } => {
-    const out = { worker: 0, staff: 0 };
-
-    const readOctober = (ws?: ExcelJS.Worksheet, sheetName: string = "") => {
-      if (!ws) {
-        console.log(`❌ Sheet ${sheetName} not found`);
-        return 0;
-      }
-
-      let headerRow = -1;
-      let octoberCol = -1;
-
-      for (let r = 1; r <= 3; r++) {
-        const row = ws.getRow(r);
-        for (let c = 16; c <= 18; c++) {
-          const cellVal = row.getCell(c).value;
-
-          if (cellVal instanceof Date) {
-            if (cellVal.getMonth() === 9 && cellVal.getFullYear() === 2025) {
-              headerRow = r;
-              octoberCol = c;
-              console.log(
-                `✅ ${sheetName}: Found October at row ${r}, col ${c}`
-              );
-              break;
-            }
-          }
-
-          const cellText = cellVal?.toString().toUpperCase() || "";
-          if (cellText.includes("SALARY") && cellText.includes("12")) {
-            headerRow = r;
-            octoberCol = c;
-            console.log(
-              `✅ ${sheetName}: Found Salary12 at row ${r}, col ${c}`
-            );
-            break;
-          }
-        }
-        if (octoberCol > 0) break;
-      }
-
-      if (headerRow < 0 || octoberCol < 0) {
-        console.log(`❌ ${sheetName}: Could not find October column`);
-        return 0;
-      }
-
-      let grandTotalRow = -1;
-      const lastRow = ws.rowCount;
-
-      for (let r = lastRow; r >= lastRow - 30; r--) {
-        const nameCell = ws.getRow(r).getCell(4);
-        const nameText = nameCell.value?.toString().toUpperCase() || "";
-
-        if (nameText.includes("GRAND") && nameText.includes("TOTAL")) {
-          grandTotalRow = r;
-          console.log(`✅ ${sheetName}: Found Grand Total at row ${r}`);
-          break;
-        }
-      }
-
-      if (grandTotalRow < 0) {
-        console.log(`❌ ${sheetName}: Could not find Grand Total row`);
-        return 0;
-      }
-
-      const totalValue = num(ws.getRow(grandTotalRow).getCell(octoberCol));
-      console.log(`✅ ${sheetName}: Grand Total value = ${totalValue}`);
-      return totalValue;
-    };
-
-    out.worker = readOctober(bonusWb.getWorksheet("Worker"), "Worker");
-    out.staff = readOctober(bonusWb.getWorksheet("Staff"), "Staff");
-
-    console.log(`\n📊 B(HR) Calculation:`);
-    console.log(`   Worker:  ₹${out.worker.toLocaleString()}`);
-    console.log(`   Staff:   ₹${out.staff.toLocaleString()}`);
-    console.log(`   Total:   ₹${(out.worker + out.staff).toLocaleString()}`);
-
-    return out;
   };
 
   // Calculate B Extras - Sum of SALARY1 from departments C, A, N (and M) from Worker file
@@ -2468,16 +2484,33 @@ const extractStaffEmployees = (
           E: 0,
         };
       }
+setReportData({
+  months,
+  departments: [
+    { name: 'Software', data: software },
+    { name: 'HR', data: hr },
+    { name: 'A,N,C', data: extras },
+    { name: 'diff', data: diff },
+  ],
+});
 
-      setReportData({
-        months,
-        departments: [
-          { name: "Software", data: software },
-          { name: "HR", data: hr },
-          { name: "A,N,C", data: extras }, // NEW ROW
-          { name: "diff", data: diff },
-        ],
-      });
+// Persist audit logs only for Generate Report
+try {
+  await storeAuditForGenerateReport(
+    {
+      months,
+      departments: [
+        { name: 'Software', data: software },
+        { name: 'HR', data: hr },
+        { name: 'A,N,C', data: extras },
+        { name: 'diff', data: diff },
+      ],
+    },
+    comparisonResults // may be null; handled in builder
+  );
+} catch (e) {
+  console.error('Audit store failed', e);
+}
     } catch (e) {
       console.error(e);
       alert("Error processing files. Please verify formats and sheet names.");

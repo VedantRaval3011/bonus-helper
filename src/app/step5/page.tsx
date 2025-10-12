@@ -103,6 +103,22 @@ export default function Step5Page() {
     937, 1039, 1065, 1105, 59, 161
   ]);
 
+  const INCLUDE_ZEROS_IN_AVG = new Set<number>([
+    20,   // SANJAY RATHOD (Staff - zero in April)
+    27,   // KIRAN SASANIYA (zero in July, Aug)
+    882,  // SHRADDHA DHODHAKIYA (zero in June)
+    898,  // RAMNIK SOLANKI (zero in March, April)
+    999,  // HANSHABEN PARMAR (zero in April, May) - starts from Dec-24
+  ]);
+
+  const EXCLUDE_ZEROS_IN_AVG = new Set<number>([
+    1054, // Different employee (joined April 2025)
+  ]);
+
+  const EMPLOYEE_START_MONTHS: Record<number, string> = {
+    999: "2024-12",  // Hanshaben Parmar joined December 2024
+  };
+
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
   const SPECIAL_GROSS_MULTIPLIER = 0.6; // 60% of gross for 12% employees
@@ -119,10 +135,10 @@ export default function Step5Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 5: Register Calculation (60% Rule for 12% Employees)");
+      console.log("📊 STEP 5: Register Calculation (Using Step-3 Gross Values)");
       console.log("=".repeat(60));
-      console.log("⚡ NEW RULE: 12% employees = (Gross × 60%) × 12% = Gross × 7.2%");
-      console.log("📌 DEFAULT RULE: 8.33% employees = Gross × 8.33%");
+      console.log("⚡ NEW RULE: 12% employees = (Step3-Gross × 60%) × 12% = Gross × 7.2%");
+      console.log("📌 DEFAULT RULE: 8.33% employees = Step3-Gross × 8.33%");
       console.log("🚫 OCTOBER EXCLUDE LIST:", Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
       console.log("🚫 EXCLUDED DEPARTMENTS (Worker):", EXCLUDED_DEPARTMENTS.join(", "));
       console.log("=".repeat(60));
@@ -397,7 +413,11 @@ export default function Step5Page() {
 
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
+          const salary1Raw = row[salary1Idx];
+          
+          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
+            ? 0 
+            : Number(salary1Raw) || 0;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -410,7 +430,21 @@ export default function Step5Page() {
           }
 
           const emp = staffEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // Check if employee should be processed for this month
+          const startMonth = EMPLOYEE_START_MONTHS[empId];
+          if (startMonth && monthKey < startMonth) {
+            continue;
+          }
+          
+          // Store zero values for special employees
+          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+            emp.months.set(monthKey, salary1);
+          } else {
+            if (salary1 > 0) {
+              emp.months.set(monthKey, salary1);
+            }
+          }
         }
       }
 
@@ -487,7 +521,11 @@ export default function Step5Page() {
 
           const empId = Number(row[empIdIdx]);
           const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
+          const salary1Raw = row[salary1Idx];
+          
+          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
+            ? 0 
+            : Number(salary1Raw) || 0;
 
           if (deptIdx !== -1) {
             const dept = String(row[deptIdx] || "").trim().toUpperCase();
@@ -509,7 +547,21 @@ export default function Step5Page() {
           }
 
           const emp = workerEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // Check if employee should be processed for this month
+          const startMonth = EMPLOYEE_START_MONTHS[empId];
+          if (startMonth && monthKey < startMonth) {
+            continue;
+          }
+          
+          // Store zero values for special employees
+          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+            emp.months.set(monthKey, salary1);
+          } else {
+            if (salary1 > 0) {
+              emp.months.set(monthKey, salary1);
+            }
+          }
         }
 
         if (excludedDeptCount > 0) {
@@ -519,7 +571,7 @@ export default function Step5Page() {
 
       console.log(`✅ Worker employees: ${workerEmployees.size}`);
 
-      // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION ==========
+      // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION (STEP-3 LOGIC) ==========
       const grossSalaryData: Map<
         number,
         { name: string; dept: string; grossSalary: number }
@@ -535,11 +587,37 @@ export default function Step5Page() {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
           
-          for (const mk of AVG_WINDOW) {
+          const includeZeros = INCLUDE_ZEROS_IN_AVG.has(empId);
+          const excludeZeros = EXCLUDE_ZEROS_IN_AVG.has(empId);
+          const hasCustomStart = EMPLOYEE_START_MONTHS[empId] !== undefined;
+          
+          // Build custom window for employees with start months
+          const employeeWindow = hasCustomStart
+            ? AVG_WINDOW.filter(mk => mk >= EMPLOYEE_START_MONTHS[empId])
+            : AVG_WINDOW;
+          
+          // Collect all months in window
+          for (const mk of employeeWindow) {
             const v = rec.months.get(mk);
-            if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
-              baseSum += Number(v);
-              monthsIncluded.push({ month: mk, value: Number(v) });
+            
+            if (includeZeros) {
+              // For employees with genuine zero months, include them
+              const val = v !== undefined ? Number(v) : 0;
+              baseSum += val;
+              monthsIncluded.push({ month: mk, value: val });
+            } else if (excludeZeros) {
+              // For mid-year joiners, only count months they were employed
+              if (v !== undefined && v !== null) {
+                const val = Number(v);
+                baseSum += val;
+                monthsIncluded.push({ month: mk, value: val });
+              }
+            } else {
+              // Normal employees: only non-zero months
+              if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
+                baseSum += Number(v);
+                monthsIncluded.push({ month: mk, value: Number(v) });
+              }
             }
           }
 
@@ -553,9 +631,18 @@ export default function Step5Page() {
               `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
-            const values = monthsIncluded.map(m => m.value);
-            estOct = values.reduce((a, b) => a + b, 0) / values.length;
-            total = baseSum + estOct;
+            // Calculate October estimate
+            if (includeZeros) {
+              // Use employeeWindow length for custom start dates
+              const divisor = hasCustomStart ? employeeWindow.length : 11;
+              estOct = baseSum / divisor;
+              total = baseSum + estOct;
+            } else {
+              // Average of only counted months
+              const values = monthsIncluded.map(m => m.value);
+              estOct = values.reduce((a, b) => a + b, 0) / values.length;
+              total = baseSum + estOct;
+            }
           }
 
           if (!grossSalaryData.has(empId)) {
@@ -633,7 +720,7 @@ export default function Step5Page() {
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("✅ Register calculation completed with 60% rule for 12% employees");
+      console.log("✅ Register calculation completed using Step-3 gross values with 60% rule for 12% employees");
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -766,10 +853,10 @@ export default function Step5Page() {
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-3xl font-bold text-gray-800">
-                Step 5 - Register Calculation (60% Rule for 12%)
+                Step 5 - Register Calculation (Using Step-3 Gross)
               </h1>
               <p className="text-gray-600 mt-2">
-                12% employees: (Gross × 60%) × 12% | 8.33% employees: Gross × 8.33%
+                12% employees: (Step3-Gross × 60%) × 12% | 8.33% employees: Step3-Gross × 8.33%
               </p>
             </div>
             <div className="flex gap-3">
@@ -857,7 +944,7 @@ export default function Step5Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Calculating with 60% rule for 12% employees...
+                  Calculating with Step-3 gross and 60% rule for 12% employees...
                 </p>
               </div>
             </div>

@@ -33,7 +33,7 @@ export default function AuditMessagesPage() {
   const [activeStep, setActiveStep] = useState<number>(2);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
-  const [includeSnapshots, setIncludeSnapshots] = useState(true); // changed default: show snapshots
+  const [includeSnapshots, setIncludeSnapshots] = useState(false); // off by default
 
   async function load(step: number) {
     setLoading(true);
@@ -101,25 +101,19 @@ export default function AuditMessagesPage() {
         )}
 
         {!loading &&
-          groups.map((g) => (
-            <BatchSection key={g.batchId} g={g} includeSnapshots={includeSnapshots} />
-          ))}
+          groups.map((g) => <BatchSection key={g.batchId} g={g} includeSnapshots={includeSnapshots} />)}
       </div>
     </div>
   );
 }
 
 function BatchSection({ g, includeSnapshots }: { g: Group; includeSnapshots: boolean }) {
-  const sorted = useMemo(
-    () =>
-      g.items
-        .slice()
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
-    [g.items]
-  );
-
-  const visible = sorted.filter((m) => includeSnapshots || m.tag !== 'metric-snapshot');
-  const hiddenCount = sorted.length - visible.length;
+  const filteredItems = useMemo(() => {
+    return g.items
+      .slice()
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .filter((m) => includeSnapshots || m.tag !== 'metric-snapshot');
+  }, [g.items, includeSnapshots]);
 
   const chips = [
     { label: 'Errors', value: g.levelCounts.error, intent: 'red' },
@@ -152,18 +146,12 @@ function BatchSection({ g, includeSnapshots }: { g: Group; includeSnapshots: boo
               {c.label}: {c.value}
             </span>
           ))}
-          <span className="ml-2 text-xs text-gray-500">{g.count} total</span>
+          <span className="ml-2 text-xs text-gray-500">{g.count} messages</span>
         </div>
       </div>
 
-      {visible.length === 0 && (
-        <div className="p-3 text-xs text-gray-500">
-          0 visible messages{hiddenCount > 0 ? ` · ${hiddenCount} hidden by filters` : ''}.
-        </div>
-      )}
-
       <div className="divide-y">
-        {visible.map((m) => (
+        {filteredItems.map((m) => (
           <MessageRow key={m._id} m={m} />
         ))}
       </div>
@@ -248,6 +236,7 @@ function MismatchChips({ meta }: { meta?: Record<string, any> }) {
 }
 
 function SnapshotChips({ meta }: { meta?: Record<string, any> }) {
+  // Expect meta: { month, snapshot: { A:{...}, B:{...}, C:{...}, D:{...}, E:{...} } }
   if (!meta || !meta.snapshot) return null;
   const month = meta.month;
   const keys: Array<'A' | 'B' | 'C' | 'D' | 'E'> = ['A', 'B', 'C', 'D', 'E'];
@@ -259,6 +248,7 @@ function SnapshotChips({ meta }: { meta?: Record<string, any> }) {
         const s = meta.snapshot[k] || {};
         const d = typeof s.diff === 'number' ? s.diff : null;
         const intent = d == null ? 'gray' : Math.abs(d) >= 1 ? 'red' : 'green';
+        // Show just the diff chip, minimal dashboard; hide raw JSON
         return (
           <Pill key={k} intent={intent as any}>
             {k}: {d == null ? '—' : d}
