@@ -32,6 +32,10 @@ export default function Step4Page() {
         /bonus.*final.*calculation|bonus.*2024-25/i.test(s.file.name)
     );
 
+  const actualPercentageFile =
+    pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??
+    pickFile((s) => !!s.file && /actual.*percentage/i.test(s.file.name));
+
   // Helper to normalize header text
   const norm = (x: any) =>
     String(x ?? "")
@@ -119,7 +123,7 @@ export default function Step4Page() {
     "2025-09",
   ];
 
-  // Calculate percentage based on months of service
+  // **CORRECTED PERCENTAGE CALCULATION** - Calculate based on current date (Oct 12, 2025)
   const calculatePercentage = (dateOfJoining: any): number => {
     if (!dateOfJoining) return 0;
 
@@ -138,28 +142,34 @@ export default function Step4Page() {
       return 0;
     }
 
-    // Calculate to October 31, 2024 (end of bonus period)
-    const referenceDate = new Date(2024, 9, 31); // October 31, 2024
+    // Calculate to 30th Sept 2025
+    const referenceDate = new Date(2025, 9, 30);
 
-    // Calculate total months of service
+    // Calculate the difference in years and months
     const yearsDiff = referenceDate.getFullYear() - doj.getFullYear();
     const monthsDiff = referenceDate.getMonth() - doj.getMonth();
     const daysDiff = referenceDate.getDate() - doj.getDate();
 
+    // Calculate total months
     let totalMonths = yearsDiff * 12 + monthsDiff;
 
-    // Adjust for partial months
+    // If the day of the reference date is before the day of joining, subtract one month
+    // because a full month hasn't been completed yet
     if (daysDiff < 0) {
       totalMonths--;
     }
 
-    // Apply percentage rules
+    console.log(
+      `DOJ: ${doj.toLocaleDateString()}, Reference: ${referenceDate.toLocaleDateString()}, Total Months: ${totalMonths}`
+    );
+
+    // Apply percentage rules based on months of service
     if (totalMonths < 12) {
       return 10; // Less than 1 year = 10%
     } else if (totalMonths >= 12 && totalMonths < 24) {
-      return 12; // 1-2 years = 12%
+      return 12; // 1 year to less than 2 years = 12%
     } else {
-      return 8.33; // More than 2 years = 8.33%
+      return 8.33; // 2 years or more = 8.33%
     }
   };
 
@@ -187,6 +197,97 @@ export default function Step4Page() {
     setError(null);
 
     try {
+      // ========== STEP 0: Read Actual Percentage file and get Average sheet employee IDs ==========
+      let employeesToIgnoreOctober = new Set<number>();
+
+      if (actualPercentageFile) {
+        try {
+          console.log("Processing Actual Percentage file...");
+          const actualBuffer = await actualPercentageFile.arrayBuffer();
+          const actualWorkbook = XLSX.read(actualBuffer);
+
+          // Read the Average sheet to get employee IDs to ignore
+          const averageSheetName = actualWorkbook.SheetNames.find(
+            (name) => name.toLowerCase() === "average"
+          );
+
+          if (averageSheetName) {
+            console.log(`Found Average sheet: ${averageSheetName}`);
+            const averageSheet = actualWorkbook.Sheets[averageSheetName];
+            const averageData: any[][] = XLSX.utils.sheet_to_json(
+              averageSheet,
+              {
+                header: 1,
+              }
+            );
+
+            // Find header row in Average sheet
+            let avgHeaderRow = -1;
+            for (let i = 0; i < Math.min(10, averageData.length); i++) {
+              const row = averageData[i];
+              if (
+                row &&
+                row.some((cell: any) => {
+                  const cellStr = String(cell || "")
+                    .toUpperCase()
+                    .replace(/\s+/g, "");
+                  return cellStr.includes("EMP") && cellStr.includes("CODE");
+                })
+              ) {
+                avgHeaderRow = i;
+                break;
+              }
+            }
+
+            if (avgHeaderRow !== -1) {
+              const avgHeaders = averageData[avgHeaderRow];
+              const avgEmpCodeIdx = avgHeaders.findIndex((h: any) => {
+                const hStr = String(h || "")
+                  .toUpperCase()
+                  .replace(/\s+/g, "");
+                return (
+                  hStr.includes("EMP") &&
+                  (hStr.includes("CODE") || hStr === "EMPCODE")
+                );
+              });
+
+              if (avgEmpCodeIdx !== -1) {
+                // Collect all employee IDs from Average sheet
+                for (let i = avgHeaderRow + 1; i < averageData.length; i++) {
+                  const row = averageData[i];
+                  if (!row || row.length === 0) continue;
+
+                  const empId = Number(row[avgEmpCodeIdx]);
+                  if (empId && !isNaN(empId)) {
+                    employeesToIgnoreOctober.add(empId);
+                  }
+                }
+
+                console.log(
+                  `✅ Found ${employeesToIgnoreOctober.size} employees in Average sheet - will set October salary to 0 for these employees`
+                );
+                console.log(
+                  "Employee IDs to ignore October estimate:",
+                  Array.from(employeesToIgnoreOctober)
+                );
+              }
+            }
+          } else {
+            console.log("Average sheet not found in Actual Percentage file");
+          }
+        } catch (err: any) {
+          console.error(
+            "Error processing Actual Percentage file:",
+            err.message
+          );
+          // Don't fail the entire process, just log and continue
+        }
+      } else {
+        console.log(
+          "Actual Percentage file not found - proceeding without October filtering"
+        );
+      }
+
       // ========== STEP 1: Process Staff file to get Gross SAL. (Software) ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
@@ -201,78 +302,108 @@ export default function Step4Page() {
         }
       > = new Map();
 
-      // Process Staff sheets - sum SALARY1 column per month
-      for (let sheetName of staffWorkbook.SheetNames) {
-        const sheet = staffWorkbook.Sheets[sheetName];
-        const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-        const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+      // In processFiles function, around line 670-730 where Staff file is processed:
 
-        console.log(`Staff sheet: ${sheetName} → monthKey: ${monthKey}`);
+for (let sheetName of staffWorkbook.SheetNames) {
+  const sheet = staffWorkbook.Sheets[sheetName];
+  const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
-        let headerIdx = -1;
-        for (let i = 0; i < Math.min(15, data.length); i++) {
-          if (
-            data[i] &&
-            data[i].some((v: any) => {
-              const t = norm(v);
-              return t === "EMPID" || t === "EMPCODE";
-            })
-          ) {
-            headerIdx = i;
-            break;
-          }
-        }
+  console.log(`Staff sheet: ${sheetName} → monthKey: ${monthKey}`);
 
-        if (headerIdx === -1) continue;
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(15, data.length); i++) {
+    if (
+      data[i] &&
+      data[i].some((v: any) => {
+        const t = norm(v);
+        return t === "EMPID" || t === "EMPCODE";
+      })
+    ) {
+      headerIdx = i;
+      break;
+    }
+  }
 
-        const headers = data[headerIdx];
-        const empIdIdx = headers.findIndex((h: any) =>
-          ["EMPID", "EMPCODE"].includes(norm(h))
-        );
-        const empNameIdx = headers.findIndex((h: any) =>
-          /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
-        );
-        const salary1Idx = headers.findIndex(
-          (h: any) =>
-            /SALARY-?1/i.test(String(h ?? "")) || norm(h) === "SALARY1"
-        );
-        const dojIdx = headers.findIndex((h: any) =>
-          /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE/i.test(String(h ?? ""))
-        );
+  if (headerIdx === -1) continue;
 
-        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
-          console.log(
-            `Skipping staff sheet ${sheetName}: missing required columns`
-          );
-          continue;
-        }
+  const headers = data[headerIdx];
+  const empIdIdx = headers.findIndex((h: any) =>
+    ["EMPID", "EMPCODE"].includes(norm(h))
+  );
+  const empNameIdx = headers.findIndex((h: any) =>
+    /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
+  );
+  const salary1Idx = headers.findIndex(
+    (h: any) =>
+      /SALARY-?1/i.test(String(h ?? "")) || norm(h) === "SALARY1"
+  );
+  const dojIdx = headers.findIndex((h: any) =>
+    /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE/i.test(String(h ?? ""))
+  );
 
-        for (let i = headerIdx + 1; i < data.length; i++) {
-          const row = data[i];
-          if (!row || row.length === 0) continue;
+  // **ADD THIS DEBUG LOG**
+  console.log(`📋 Sheet: ${sheetName}`);
+  console.log(`  Headers found at row ${headerIdx}`);
+  console.log(`  EMP ID column index: ${empIdIdx}`);
+  console.log(`  Name column index: ${empNameIdx}`);
+  console.log(`  SALARY1 column index: ${salary1Idx}`);
+  console.log(`  DOJ column index: ${dojIdx}`); // ← Check if this is -1
+  if (dojIdx !== -1) {
+    console.log(`  DOJ column header: "${headers[dojIdx]}"`);
+  } else {
+    console.warn(`  ⚠️ DOJ column NOT FOUND in sheet ${sheetName}`);
+  }
 
-          const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "")
-            .trim()
-            .toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
-          const doj = dojIdx !== -1 ? row[dojIdx] : null;
+  if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
+    console.log(
+      `Skipping staff sheet ${sheetName}: missing required columns`
+    );
+    continue;
+  }
 
-          if (!empId || isNaN(empId) || !empName) continue;
+  for (let i = headerIdx + 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || row.length === 0) continue;
 
-          if (!staffEmployees.has(empId)) {
-            staffEmployees.set(empId, {
-              name: empName,
-              dept: "Staff",
-              dateOfJoining: doj,
-              months: new Map(),
-            });
-          }
+    const empId = Number(row[empIdIdx]);
+    const empName = String(row[empNameIdx] || "")
+      .trim()
+      .toUpperCase();
+    const salary1 = Number(row[salary1Idx]) || 0;
+    const doj = dojIdx !== -1 ? row[dojIdx] : null;
 
-          const emp = staffEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
-        }
+    if (!empId || isNaN(empId) || !empName) continue;
+
+    // **ADD THIS DEBUG LOG FOR EMPLOYEE 554**
+    if (empId === 554) {
+      console.log(`🔍 FOUND EMPLOYEE 554 in sheet ${sheetName}:`);
+      console.log(`  Name: ${empName}`);
+      console.log(`  DOJ raw value: ${doj}`);
+      console.log(`  DOJ type: ${typeof doj}`);
+      console.log(`  DOJ index: ${dojIdx}`);
+    }
+
+    if (!staffEmployees.has(empId)) {
+      staffEmployees.set(empId, {
+        name: empName,
+        dept: "Staff",
+        dateOfJoining: doj,
+        months: new Map(),
+      });
+    } else {
+      // **CRITICAL FIX**: If DOJ already exists, don't overwrite it with null
+      const existingEmp = staffEmployees.get(empId)!;
+      if (!existingEmp.dateOfJoining && doj) {
+        existingEmp.dateOfJoining = doj;
+        console.log(`Updated DOJ for employee ${empId} from sheet ${sheetName}`);
       }
+    }
+
+    const emp = staffEmployees.get(empId)!;
+    emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+  }
+}
 
       console.log(`Total staff employees: ${staffEmployees.size}`);
 
@@ -295,10 +426,12 @@ export default function Step4Page() {
         }
 
         // Only calculate October 2025 estimate if September 2025 data exists
+        // AND employee is NOT in the Average sheet
         let estOct = 0;
         const hasSep2025 = rec.months.has("2025-09");
+        const isInAverageSheet = employeesToIgnoreOctober.has(empId);
 
-        if (hasSep2025) {
+        if (hasSep2025 && !isInAverageSheet) {
           // Compute mean across window months that exist for this employee
           const values: number[] = [];
           for (const mk of AVG_WINDOW) {
@@ -314,9 +447,13 @@ export default function Step4Page() {
           console.log(
             `Employee ${empId} (${
               rec.name
-            }): Has Sep 2025 data, Base sum = ${baseSum}, Oct estimate = ${estOct}, Total = ${
+            }): Has Sep 2025 data, NOT in Average sheet, Base sum = ${baseSum}, Oct estimate = ${estOct}, Total = ${
               baseSum + estOct
             }`
+          );
+        } else if (isInAverageSheet) {
+          console.log(
+            `🚫 Employee ${empId} (${rec.name}): Found in Average sheet - IGNORING October estimate (set to 0), Total = ${baseSum}`
           );
         } else {
           console.log(
@@ -603,11 +740,27 @@ export default function Step4Page() {
     try {
       let date: Date;
       if (typeof dateValue === "number") {
+        // Excel serial date number
         const excelEpoch = new Date(1899, 11, 30);
         date = new Date(excelEpoch.getTime() + dateValue * 86400000);
+      } else if (typeof dateValue === "string") {
+        // Try parsing DD.MM.YY or DD-MM-YY format (Indian format)
+        const ddmmyyMatch = dateValue.match(
+          /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/
+        );
+        if (ddmmyyMatch) {
+          let [, day, month, year] = ddmmyyMatch;
+          let y = parseInt(year);
+          if (y < 100) y += 2000; // Convert 23 to 2023
+          date = new Date(y, parseInt(month) - 1, parseInt(day));
+        } else {
+          date = new Date(dateValue);
+        }
       } else {
         date = new Date(dateValue);
       }
+
+      if (isNaN(date.getTime())) return "Invalid Date";
 
       return date.toLocaleDateString("en-IN", {
         year: "numeric",
@@ -651,7 +804,8 @@ export default function Step4Page() {
     <div
       className={`border-2 rounded-lg p-6 ${
         file ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"
-      }`}>
+      }`}
+    >
       {file ? (
         <div className="space-y-3">
           <div className="bg-white rounded-lg p-4 border border-green-200">
@@ -670,7 +824,8 @@ export default function Step4Page() {
               className="w-4 h-4"
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24">
+              viewBox="0 0 24 24"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -688,7 +843,8 @@ export default function Step4Page() {
               className="w-5 h-5"
               fill="none"
               stroke="currentColor"
-              viewBox="0 0 24 24">
+              viewBox="0 0 24 24"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -725,12 +881,14 @@ export default function Step4Page() {
             <div className="flex gap-3">
               <button
                 onClick={() => router.push("/step3")}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition">
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+              >
                 ← Back to Step 3
               </button>
               <button
                 onClick={() => router.push("/")}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+              >
                 Back to Step 1
               </button>
             </div>
@@ -743,7 +901,8 @@ export default function Step4Page() {
                 className="w-5 h-5"
                 fill="none"
                 stroke="currentColor"
-                viewBox="0 0 24 24">
+                viewBox="0 0 24 24"
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -778,18 +937,24 @@ export default function Step4Page() {
                 </li>
               </ul>
               <p>
+                <strong>October Filtering:</strong> If employee ID exists in the
+                "Average" sheet of Actual Percentage file, October estimate is
+                set to 0
+              </p>
+              <p>
                 <strong>GROSS 02 (HR):</strong> SUM of all "GROSS 02" values
                 from bonus file (for duplicate employee IDs)
               </p>
               <p className="text-xs text-blue-600 mt-2">
-                Note: Percentage is calculated based on years of service: &lt;1
-                year = 10% | 1-2 years = 12% | &gt;2 years = 8.33%
+                <strong>✅ CORRECTED:</strong> Percentage is calculated based on
+                service period as of Oct 12, 2025: &lt;12 months = 10% | 12-23
+                months = 12% | ≥24 months = 8.33%
               </p>
             </div>
           </div>
 
           {/* File Cards */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
               file={staffFile}
@@ -801,6 +966,12 @@ export default function Step4Page() {
               file={bonusFile}
               description="Bonus calculation data with GROSS 02 (Staff sheet only)"
             />
+
+            <FileCard
+              title="Actual Percentage"
+              file={actualPercentageFile}
+              description="Optional: Controls October estimate filtering"
+            />
           </div>
 
           {/* Missing Files Alert */}
@@ -811,7 +982,8 @@ export default function Step4Page() {
                   className="w-6 h-6 text-yellow-600"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0 0 24 24">
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -852,7 +1024,8 @@ export default function Step4Page() {
                   className="w-6 h-6 text-red-600"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0 0 24 24">
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -876,12 +1049,14 @@ export default function Step4Page() {
                 <div className="flex gap-3">
                   <button
                     onClick={exportToExcel}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2">
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
+                  >
                     <svg
                       className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
-                      viewBox="0 0 24 24">
+                      viewBox="0 0 24 24"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -893,13 +1068,15 @@ export default function Step4Page() {
                   </button>
                   <button
                     onClick={() => router.push("/step5")}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2">
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition flex items-center gap-2"
+                  >
                     Move to Step 5
                     <svg
                       className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
-                      viewBox="0 0 24 24">
+                      viewBox="0 0 24 24"
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -951,7 +1128,8 @@ export default function Step4Page() {
                     {filteredData.map((row, idx) => (
                       <tr
                         key={idx}
-                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                      >
                         <td className="border border-gray-300 px-4 py-2">
                           {row.employeeId}
                         </td>
@@ -983,7 +1161,8 @@ export default function Step4Page() {
                             Math.abs(row.difference) <= 12
                               ? "text-green-600"
                               : "text-red-600"
-                          }`}>
+                          }`}
+                        >
                           {formatCurrency(row.difference)}
                         </td>
                         <td className="border border-gray-300 px-4 py-2 text-center">
@@ -992,7 +1171,8 @@ export default function Step4Page() {
                               row.status === "Match"
                                 ? "bg-green-100 text-green-800"
                                 : "bg-red-100 text-red-800"
-                            }`}>
+                            }`}
+                          >
                             {row.status}
                           </span>
                         </td>

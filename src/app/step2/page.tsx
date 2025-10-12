@@ -101,13 +101,15 @@ export default function Step2Page() {
 
       // Calculate for workers
       comparisonResults.workerComparisons.forEach((emp) => {
-        const actualSal = emp.actualSalaries[month] || 0;
-        const hrSal = emp.hrSalaries[month] || 0;
-        const diff = Math.abs(actualSal - hrSal);
-
-        if (actualSal > 0 || hrSal > 0) {
+        const aRaw = emp.actualSalaries[month];
+        const hRaw = emp.hrSalaries[month];
+        const hasA = aRaw !== undefined && !isNaN(aRaw as number);
+        const hasH = hRaw !== undefined && !isNaN(hRaw as number);
+        const a = hasA ? (aRaw as number) : 0;
+        const h = hasH ? (hRaw as number) : 0;
+        if (hasA || hasH) {
           employeeCount++;
-          totalDiff += diff;
+          totalDiff += Math.abs(a - h);
         }
       });
 
@@ -121,6 +123,86 @@ export default function Step2Page() {
 
     return { canProceed, monthlyStats };
   };
+
+const getCellNumericValue = (
+  cell: ExcelJS.Cell
+): { hasValue: boolean; value: number } => {
+  const v: any = cell.value;
+
+  // Null/undefined are blank
+  if (v === null || v === undefined) {
+    return { hasValue: false, value: 0 };
+  }
+
+  // ✅ Handle formula objects (both regular and shared formulas)
+  if (typeof v === "object" && v !== null) {
+    // Check if it has a result field
+    if ("result" in v) {
+      const res = v.result;
+      
+      if (res !== null && res !== undefined) {
+        if (typeof res === "number") {
+          return { hasValue: true, value: res };
+        }
+        
+        if (typeof res === "string") {
+          const s = String(res).trim();
+          if (!s || s === "-") {
+            return { hasValue: false, value: 0 };
+          }
+          const n = Number(s.replace(/,/g, ""));
+          if (Number.isFinite(n)) {
+            return { hasValue: true, value: n };
+          }
+        }
+      }
+    }
+    
+    // ✅ For shared formulas without results, check the cell's master formula
+    // If sharedFormula exists but no result, try cell.text
+    if ("sharedFormula" in v && !("result" in v)) {
+      // Fall through to cell.text check below
+    } else {
+      // Other object types without valid result = no value
+      return { hasValue: false, value: 0 };
+    }
+  }
+
+  // Strings
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s || s === "-") {
+      return { hasValue: false, value: 0 };
+    }
+    const n = Number(s.replace(/,/g, ""));
+    return Number.isFinite(n)
+      ? { hasValue: true, value: n }
+      : { hasValue: false, value: 0 };
+  }
+
+  // Direct numbers
+  if (typeof v === "number") {
+    return { hasValue: true, value: v };
+  }
+
+  // ✅ Last resort: cell.text (for shared formulas without cached results)
+  const t = cell.text?.trim();
+  
+  // ✅ SPECIAL CASE: If cell.text is empty but we know it's a formula cell,
+  // treat it as 0 (value exists, just equals zero)
+  if (typeof v === "object" && "sharedFormula" in v && (!t || t === "")) {
+    return { hasValue: true, value: 0 };  // ✅ This fixes April!
+  }
+  
+  if (!t || t === "-") {
+    return { hasValue: false, value: 0 };
+  }
+  
+  const n = Number(t.replace(/,/g, ""));
+  return Number.isFinite(n)
+    ? { hasValue: true, value: n }
+    : { hasValue: false, value: 0 };
+};
 
   const handleMoveToStep3 = () => {
     const { canProceed } = calculateMonthlyDifferences();
@@ -740,6 +822,8 @@ export default function Step2Page() {
       if (headerRow < 0 || grossSalaryCol < 0) continue;
 
       // Read each employee's GROSS SALARY for this month
+      // In the getCHR function, find and replace:
+      // Find and replace this section:
       for (let r = headerRow + 1; r <= monthSheet.rowCount; r++) {
         const row = monthSheet.getRow(r);
         const empId = row.getCell(empIdCol).value?.toString().trim() || "";
@@ -748,15 +832,20 @@ export default function Step2Page() {
 
         if (!empName || empName.includes("TOTAL")) continue;
 
-        const grossSalary = num(row.getCell(grossSalaryCol));
+        // ❌ OLD CODE:
+        // const grossSalary = num(row.getCell(grossSalaryCol));
+
+        // ✅ NEW CODE:
+        const cellResult = getCellNumericValue(row.getCell(grossSalaryCol));
         const key = empId || empName;
 
         if (!employees[key]) {
           employees[key] = [];
         }
 
-        if (grossSalary > 0) {
-          employees[key].push(grossSalary);
+        // Include the value if cell has any value (including 0)
+        if (cellResult.hasValue) {
+          employees[key].push(cellResult.value);
         }
       }
     }
@@ -1080,103 +1169,24 @@ export default function Step2Page() {
 
         if (!empName || empName === "" || empName.includes("TOTAL")) continue;
 
-        const salary1 = num(row.getCell(salary1Col));
+        const cellResult = getCellNumericValue(row.getCell(salary1Col));
         const key = empId || empName;
 
         if (!employees[key]) {
           employees[key] = { salaries: [], hasSeptSalary: false };
         }
 
-        if (salary1 > 0) {
-          employees[key].salaries.push(salary1);
+        // Include the value if cell has any value (including 0)
+        if (cellResult.hasValue) {
+          employees[key].salaries.push(cellResult.value);
         }
 
-        if (monthKey === "Sep-25" && salary1 > 0) {
-          employees[key].hasSeptSalary = true;
-        }
-      }
-    }
-
-    let totalOctober = 0;
-    for (const key of Object.keys(employees)) {
-      const emp = employees[key];
-
-      if (emp.hasSeptSalary && emp.salaries.length > 0) {
-        const average =
-          emp.salaries.reduce((sum, val) => sum + val, 0) / emp.salaries.length;
-        totalOctober += average;
-      }
-    }
-
-    return totalOctober;
-  };
-
-  const calculateOctoberAverageForStaff = (
-    staffWb: ExcelJS.Workbook,
-    staffMap: Record<string, string>
-  ): number => {
-    const monthsToAverage = [
-      "Nov-24",
-      "Dec-24",
-      "Jan-25",
-      "Feb-25",
-      "Mar-25",
-      "Apr-25",
-      "May-25",
-      "Jun-25",
-      "Jul-25",
-      "Aug-25",
-      "Sep-25",
-    ];
-
-    const employees: Record<
-      string,
-      { salaries: number[]; hasSeptSalary: boolean }
-    > = {};
-
-    for (const monthKey of monthsToAverage) {
-      const ws = staffWb.getWorksheet(staffMap[monthKey]);
-      if (!ws) continue;
-
-      let headerRow = -1;
-      for (let r = 1; r <= 5; r++) {
-        const row = ws.getRow(r);
-        const cellText = row.getCell(2).value?.toString().toUpperCase() || "";
-        if (cellText.includes("EMP") && cellText.includes("ID")) {
-          headerRow = r;
-          break;
-        }
-      }
-
-      if (headerRow < 0) continue;
-
-      const empIdCol = 2;
-      const empNameCol = 5;
-      const salary1Col = 15;
-
-      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-        const row = ws.getRow(r);
-        const empName = row
-          .getCell(empNameCol)
-          .value?.toString()
-          .trim()
-          .toUpperCase();
-        const empId = row.getCell(empIdCol).value?.toString().trim() || "";
-
-        if (!empName || empName === "" || empName.includes("TOTAL")) continue;
-
-        const salary1 = num(row.getCell(salary1Col));
-        const key = empId || empName;
-
-        if (!employees[key]) {
-          employees[key] = { salaries: [], hasSeptSalary: false };
-        }
-
-        if (salary1 > 0) {
-          employees[key].salaries.push(salary1);
-        }
-
-        if (monthKey === "Sep-25" && salary1 > 0) {
+        // For September check, still use > 0 since we want employees with actual salary
+        if (
+          monthKey === "Sep-25" &&
+          cellResult.hasValue &&
+          cellResult.value > 0
+        ) {
           employees[key].hasSeptSalary = true;
         }
       }
@@ -1256,10 +1266,10 @@ export default function Step2Page() {
 
         if (!empName || empName === "" || empName.includes("TOTAL")) continue;
 
-        const salary1 = num(row.getCell(salary1Col));
-        const grossSal = num(row.getCell(grossSalCol));
-        const key = empId || empName;
+        const salary1Result = getCellNumericValue(row.getCell(salary1Col));
+        const grossSalResult = getCellNumericValue(row.getCell(grossSalCol));
 
+        const key = `${empId}_${empName}`;
         if (!employees[key]) {
           employees[key] = {
             grossSalaries: [],
@@ -1268,18 +1278,22 @@ export default function Step2Page() {
           };
         }
 
-        // Track SALARY1 for Sept condition
-        if (salary1 > 0) {
-          employees[key].salary1Values.push(salary1);
+        // Track SALARY1 for Sept condition - only if cell has value (including 0)
+        if (salary1Result.hasValue) {
+          employees[key].salary1Values.push(salary1Result.value);
         }
 
-        // Track GROSS SALARY for averaging
-        if (grossSal > 0) {
-          employees[key].grossSalaries.push(grossSal);
+        // Track GROSS SALARY for averaging - include zeros!
+        if (grossSalResult.hasValue) {
+          employees[key].grossSalaries.push(grossSalResult.value);
         }
 
-        // Check September SALARY1 condition
-        if (monthKey === "Sep-25" && salary1 > 0) {
+        // Check September SALARY1 condition - check for actual value > 0
+        if (
+          monthKey === "Sep-25" &&
+          salary1Result.hasValue &&
+          salary1Result.value > 0
+        ) {
           employees[key].hasSeptSalary1 = true;
         }
       }
@@ -1304,180 +1318,133 @@ export default function Step2Page() {
     return totalOctober;
   };
 
-  // A(HR) - Calculate per-employee October average from WD SALARY, then sum
-  const calculateOctoberAverageForHR = (
-    monthWiseWb: ExcelJS.Workbook | null,
-    workerWb: ExcelJS.Workbook,
-    workerMap: Record<string, string>
-  ): number => {
-    const monthsToAverage = [
-      "Nov-24",
-      "Dec-24",
-      "Jan-25",
-      "Feb-25",
-      "Mar-25",
-      "Apr-25",
-      "May-25",
-      "Jun-25",
-      "Jul-25",
-      "Aug-25",
-      "Sep-25",
-    ];
+const extractStaffEmployees = (
+  wb: ExcelJS.Workbook,
+  sheetNames: string[]
+) => {
+  const employees: Record<string, EmployeeMonthlySalary> = {};
+  const months = generateMonthHeaders();
 
-    // Store each employee's monthly WD SALARY values
-    const employees: Record<string, number[]> = {};
+  for (const sheetName of sheetNames) {
+    const ws = wb.getWorksheet(sheetName);
+    if (!ws) continue;
 
-    for (const monthKey of monthsToAverage) {
-      const monthSheet = (monthWiseWb || workerWb).getWorksheet(
-        workerMap[monthKey]
-      );
-      if (!monthSheet) continue;
-
-      // Find header row and columns
-      let headerRow = -1;
-      let wdSalaryCol = -1;
-      let empIdCol = -1;
-      let empNameCol = -1;
-
-      for (let r = 1; r <= 6; r++) {
-        const row = monthSheet.getRow(r);
-        const cell2Text = row.getCell(2).value?.toString().toUpperCase() || "";
-
-        if (cell2Text.includes("EMP") && cell2Text.includes("ID")) {
-          headerRow = r;
-          empIdCol = 2;
-          empNameCol = 4;
-        }
-
-        // Find WD SALARY column
-        row.eachCell((cell, c) => {
-          const text = cell.value?.toString().toUpperCase() || "";
-          if (text.includes("WD") && text.includes("SALARY")) {
-            wdSalaryCol = c;
-          }
-        });
-
-        if (headerRow > 0 && wdSalaryCol > 0) break;
-      }
-
-      if (headerRow < 0 || wdSalaryCol < 0) continue;
-
-      // Read each employee's WD SALARY for this month
-      for (let r = headerRow + 1; r <= monthSheet.rowCount; r++) {
-        const row = monthSheet.getRow(r);
-        const empId = row.getCell(empIdCol).value?.toString().trim() || "";
-        const empName =
-          row.getCell(empNameCol).value?.toString().trim().toUpperCase() || "";
-
-        if (!empName || empName.includes("TOTAL")) continue;
-
-        const wdSalary = num(row.getCell(wdSalaryCol));
-        const key = empId || empName;
-
-        if (!employees[key]) {
-          employees[key] = [];
-        }
-
-        if (wdSalary > 0) {
-          employees[key].push(wdSalary);
-        }
+    let headerRow = -1;
+    for (let r = 1; r <= 5; r++) {
+      const t = ws.getRow(r).getCell(2).value?.toString().toUpperCase() || "";
+      if (t.includes("EMP") && t.includes("ID")) {
+        headerRow = r;
+        break;
       }
     }
+    if (headerRow < 0) continue;
 
-    // Calculate October value for each employee, then sum
-    let totalOctober = 0;
-    let employeeCount = 0;
+    const monthKey = sheetNameToMonthKey(sheetName);
+    if (!monthKey) continue;
 
-    for (const key in employees) {
-      const values = employees[key];
-      if (values.length > 0) {
-        const average =
-          values.reduce((sum, val) => sum + val, 0) / values.length;
-        totalOctober += average;
-        employeeCount++;
+    const empIdCol = 2,
+      deptCol = 3,
+      empNameCol = 5,
+      salary1Col = 15;
+
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+
+      const empName =
+        row.getCell(empNameCol).value?.toString().trim().toUpperCase() || "";
+      if (!empName || empName.includes("TOTAL")) continue;
+
+      const empId = row.getCell(empIdCol).value?.toString().trim() || "";
+      const dept = (
+        row.getCell(deptCol).value?.toString().trim() || ""
+      ).toUpperCase();
+
+      const key = empId || empName;
+      
+      // 🐛 DETAILED DEBUG: Check what's actually in the cell
+      const cell = row.getCell(salary1Col);
+      const cellValue = cell.value;
+      const cellText = cell.text;
+      
+      if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
+        console.log(`\n🔍 ${monthKey} SANJAY RATHOD RAW DATA:`);
+        console.log(`   cell.value =`, cellValue);
+        console.log(`   cell.text =`, cellText);
+        console.log(`   typeof cell.value =`, typeof cellValue);
+        
+        if (cellValue && typeof cellValue === 'object') {
+          console.log(`   cell.value.result =`, (cellValue as any).result);
+          console.log(`   typeof result =`, typeof (cellValue as any).result);
+        }
+      }
+      
+      const s1 = getCellNumericValue(cell);
+
+      if (!employees[key]) {
+        employees[key] = {
+          name: empName,
+          employeeCode: empId || empName,
+          department: dept,
+          monthlySalaries: {},
+          monthlyDepartments: {},
+          source: "Staff",
+        };
+      }
+
+      if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
+        console.log(`   getCellNumericValue returned: hasValue=${s1.hasValue}, value=${s1.value}`);
+      }
+
+      if (s1.hasValue) {
+        employees[key].monthlySalaries[monthKey] = s1.value;
+        
+        if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
+          console.log(`   ✅ ${monthKey} INCLUDED: ${s1.value}`);
+        }
+      } else {
+        if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
+          console.log(`   ❌ ${monthKey} SKIPPED\n`);
+        }
+      }
+
+      if (dept) {
+        employees[key].monthlyDepartments![monthKey] = dept;
       }
     }
+  }
 
-    console.log(`\n📊 A(HR) Employee-Level Calculation:`);
-    console.log(`   Employees processed: ${employeeCount}`);
-    console.log(`   Total October A(HR): ₹${totalOctober.toLocaleString()}`);
+  // Rest of the function remains the same...
+  const monthsReversed = [...months].reverse();
+  for (const key in employees) {
+    const emp = employees[key];
+    let finalDept = "";
 
-    return totalOctober;
-  };
-
-  const extractStaffEmployees = (
-    wb: ExcelJS.Workbook,
-    sheetNames: string[]
-  ): Record<string, EmployeeMonthlySalary> => {
-    const employees: Record<string, EmployeeMonthlySalary> = {};
-    const months = generateMonthHeaders();
-
-    for (const sheetName of sheetNames) {
-      const ws = wb.getWorksheet(sheetName);
-      if (!ws) continue;
-
-      let headerRow = -1;
-      for (let r = 1; r <= 5; r++) {
-        const row = ws.getRow(r);
-        const cellText = row.getCell(2).value?.toString().toUpperCase() || "";
-        if (cellText.includes("EMP") && cellText.includes("ID")) {
-          headerRow = r;
+    for (const m of monthsReversed) {
+      const d = emp.monthlyDepartments?.[m]?.toUpperCase();
+      if (d && !["C", "A"].includes(d)) {
+        finalDept = d;
+        break;
+      }
+    }
+    if (!finalDept && emp.monthlyDepartments?.["Sep-25"]) {
+      finalDept = emp.monthlyDepartments["Sep-25"].toUpperCase();
+    }
+    if (!finalDept) {
+      for (const m of monthsReversed) {
+        const d = emp.monthlyDepartments?.[m]?.toUpperCase();
+        if (d) {
+          finalDept = d;
           break;
         }
       }
-
-      if (headerRow < 0) continue;
-
-      const monthKey = sheetNameToMonthKey(sheetName);
-      if (!monthKey) continue;
-
-      const empIdCol = 2;
-      const deptCol = 3;
-      const empNameCol = 5;
-      const salary1Col = 15;
-
-      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-        const row = ws.getRow(r);
-        const empName = row
-          .getCell(empNameCol)
-          .value?.toString()
-          .trim()
-          .toUpperCase();
-        const empId = row.getCell(empIdCol).value?.toString().trim() || "";
-        const dept = row.getCell(deptCol).value?.toString().trim() || "";
-
-        if (!empName || empName === "" || empName.includes("TOTAL")) continue;
-
-        const salary1 = num(row.getCell(salary1Col));
-        const key = empId || empName;
-
-        if (!employees[key]) {
-          employees[key] = {
-            name: empName,
-            employeeCode: empId,
-            department: dept,
-            monthlySalaries: {},
-            source: "Staff",
-          };
-          months.forEach((m) => (employees[key].monthlySalaries[m] = 0));
-        }
-
-        if (salary1 > 0) {
-          employees[key].monthlySalaries[monthKey] = salary1;
-        }
-
-        if (!employees[key].employeeCode && empId) {
-          employees[key].employeeCode = empId;
-        }
-        if (!employees[key].department && dept) {
-          employees[key].department = dept;
-        }
-      }
     }
 
-    return employees;
-  };
+    emp.department = finalDept || emp.department?.toUpperCase();
+    if (!emp.employeeCode) emp.employeeCode = key;
+  }
 
+  return employees;
+};
   const extractWorkerEmployees = (
     wb: ExcelJS.Workbook,
     sheetNames: string[]
@@ -1485,6 +1452,7 @@ export default function Step2Page() {
     const employees: Record<string, EmployeeMonthlySalary> = {};
     const months = generateMonthHeaders();
 
+    // First pass: collect all data
     for (const sheetName of sheetNames) {
       const ws = wb.getWorksheet(sheetName);
       if (!ws) continue;
@@ -1519,33 +1487,67 @@ export default function Step2Page() {
 
         const s1 = num(row.getCell(salary1Col));
         const key = id || name;
-
+        const res = getCellNumericValue(row.getCell(salary1Col));
         if (!employees[key]) {
           employees[key] = {
             name,
             employeeCode: id,
-            department: dept,
+            department: "",
             monthlySalaries: {},
-            monthlyDepartments: {}, // Add this
+            monthlyDepartments: {},
             source: "Worker",
           };
-          months.forEach((m) => (employees[key].monthlySalaries[m] = 0));
         }
 
-        if (s1 > 0) {
-          employees[key].monthlySalaries[monthKey] = s1;
+        if (res.hasValue) {
+          employees[key].monthlySalaries[monthKey] = res.value; // includes explicit 0
+        }
+        if (monthKey && dept) {
+          employees[key].monthlyDepartments![monthKey] = dept;
         }
 
         // Track department for each month
         if (monthKey && dept) {
           employees[key].monthlyDepartments![monthKey] = dept;
         }
+      }
+    }
 
-        // Update latest department
-        if (!employees[key].department && dept) {
-          employees[key].department = dept;
+    // Second pass: determine the best department for each employee
+    // Priority: 1) Latest non-C/A department, 2) September department, 3) Any department
+    for (const key in employees) {
+      const emp = employees[key];
+      let finalDept = "";
+
+      // Get departments in reverse chronological order (Sep-25 to Nov-24)
+      const monthsReversed = [...months].reverse();
+
+      // First, try to find the latest non-C/A department
+      for (const month of monthsReversed) {
+        const dept = emp.monthlyDepartments?.[month];
+        if (dept && !["C", "A"].includes(dept.toUpperCase())) {
+          finalDept = dept;
+          break;
         }
       }
+
+      // If no non-C/A department found, use September department if available
+      if (!finalDept && emp.monthlyDepartments?.["Sep-25"]) {
+        finalDept = emp.monthlyDepartments["Sep-25"];
+      }
+
+      // If still no department, use any available department
+      if (!finalDept) {
+        for (const month of monthsReversed) {
+          const dept = emp.monthlyDepartments?.[month];
+          if (dept) {
+            finalDept = dept;
+            break;
+          }
+        }
+      }
+
+      emp.department = finalDept;
     }
 
     return employees;
@@ -1689,11 +1691,14 @@ export default function Step2Page() {
         // ✅ SUM all values for this employee code across all records
         let av = 0;
         for (const emp of actualEmps) {
-          const salary = emp?.monthlySalaries?.[m] || 0;
-          const monthDept = emp?.monthlyDepartments?.[m] || dept.toUpperCase();
-
-          // If department is C for this month, treat salary1 as 0
-          if (monthDept !== "C") {
+          const salary = emp?.monthlySalaries?.[m];
+          const monthDept = emp?.monthlyDepartments?.[m];
+          if (
+            monthDept &&
+            monthDept.toUpperCase() === (dept || "").toUpperCase() &&
+            salary !== undefined &&
+            !isNaN(salary)
+          ) {
             av += salary;
           }
         }
@@ -1708,10 +1713,10 @@ export default function Step2Page() {
         hrSalaries[m] = hv;
 
         // Check for mismatch
-        const monthDept =
-          firstActual?.monthlyDepartments?.[m] || dept.toUpperCase();
+        const md = firstActual?.monthlyDepartments?.[m];
         const shouldIgnoreMonth =
-          ["C", "A"].includes(monthDept) || code.toUpperCase() === "N";
+          (md ? ["C", "A"].includes(md.toUpperCase()) : true) ||
+          code.toUpperCase() === "N";
 
         if (Math.abs(av - hv) > 1 && !shouldIgnoreMonth) {
           hasMismatch = true;
@@ -1867,48 +1872,65 @@ export default function Step2Page() {
         for (const key in employees) {
           const emp = employees[key];
 
-          // CHECK 2: If employee ID is in Average sheet, exclude October values
+          // Skip assigning Oct-25 for Average-sheet employees (leave unset)
           if (averageSheetEmployeeIds.has(emp.employeeCode)) {
-            console.log(
-              `Excluding October for ${emp.name} (${emp.employeeCode}) - found in Average sheet`
-            );
-            emp.monthlySalaries["Oct-25"] = 0;
             continue;
           }
 
+          // If September salary missing/zero, skip assigning October (leave unset)
+          const septSalary = emp.monthlySalaries["Sep-25"];
+          if (
+            septSalary === undefined ||
+            septSalary === null ||
+            septSalary === 0
+          ) {
+            continue;
+          }
+
+          const finalDept = (emp.department || "").toUpperCase();
           const values: number[] = [];
 
-          // CHECK 1: Check if September salary1 exists
-          const septSalary = emp.monthlySalaries["Sep-25"] || 0;
-
-          // If September salary1 is 0 or doesn't exist, skip October calculation
-          if (septSalary < 1) {
-            emp.monthlySalaries["Oct-25"] = 0;
-            continue;
-          }
-
-          // Collect all salary values from Nov-24 to Sep-25
           for (const month of monthsToAverage) {
-            const salary = emp.monthlySalaries[month] || 0;
-            const monthDept = emp.monthlyDepartments?.[month] || emp.department;
+  const salary = emp.monthlySalaries[month];
+  
+  // ✅ NEW: Check if salary is actually present AND has a meaningful value
+  // undefined/null = month was blank in Excel (exclude from average)
+  // 0 or positive number = month had value in Excel (include in average, even if 0)
+  if (salary === undefined || salary === null) {
+    continue; // Skip months with no data
+  }
 
-            // Ignore salary1 if department is C for this month
-            if (monthDept.toUpperCase() === "C") {
-              continue;
-            }
+  // Require a recorded month department; no fallback to current/Final
+  const monthDept = emp.monthlyDepartments?.[month];
+  if (!monthDept) continue;
 
-            if (salary > 0) {
-              values.push(salary);
-            }
-          }
+  const md = monthDept.toUpperCase();
+  if (md === "C" || md !== finalDept) continue;
 
-          // Calculate average and assign to October
+  // ✅ Include the value (even if it's 0) because cell had a value
+  values.push(salary);
+}
+
+
           if (values.length > 0) {
             const average =
               values.reduce((sum, val) => sum + val, 0) / values.length;
-            emp.monthlySalaries["Oct-25"] = Math.round(average);
+            emp.monthlySalaries["Oct-25"] = Math.round(average * 2) / 2;
+             if (emp.name.includes('SANJAY') && emp.name.includes('RATHOD')) {
+    console.log(`\n📊 SANJAY RATHOD October Calculation:`);
+    console.log(`   Values: [${values.join(', ')}]`);
+    console.log(`   Average: ${average}`);
+  }
+            if (emp.monthlyDepartments) {
+              emp.monthlyDepartments["Oct-25"] =
+                emp.monthlyDepartments["Sep-25"] || emp.department;
+            }
           } else {
-            emp.monthlySalaries["Oct-25"] = 0;
+            // Leave Oct-25 salary unset when no eligible months
+            if (emp.monthlyDepartments) {
+              emp.monthlyDepartments["Oct-25"] =
+                emp.monthlyDepartments["Sep-25"] || emp.department;
+            }
           }
         }
       };
