@@ -196,6 +196,17 @@ function buildStep3MismatchMessages(rows: any[]) {
   return items;
 }
 
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const batchId = `step3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const items = [buildStep3SummaryMessage(comparisonData), ...buildStep3MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep3(items, batchId).catch(err => console.error('Auto-audit step3 failed', err));
+}, [comparisonData]);
+
+
 // Optional: one compact info summary for the run
 function buildStep3SummaryMessage(rows: any[]) {
   const total = rows.length || 0;

@@ -15,6 +15,168 @@ export default function Step6Page() {
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
 
+  // === Step 6 Audit Helpers ===
+const TOLERANCE_STEP6 = 12; // Step 6 uses ±12 to mark Match vs Mismatch
+
+async function postAuditMessagesStep6(items: any[], batchId?: string) {
+  const bid =
+    batchId ||
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: bid, step: 6, items }),
+  });
+  return bid;
+}
+
+function buildStep6MismatchMessages(rows: any[]) {
+  // Expecting rows with: { employeeId, employeeName, department, monthsOfService, isEligible, percentage, grossSalarySoftware, registerSoftware, registerHR, unpaidSoftware, unpaidHR, hrOccurrences, difference, status, validationError }
+  const items: any[] = [];
+  for (const r of rows) {
+    if (r?.status === 'Mismatch' || r?.status === 'Error') {
+      items.push({
+        level: r.status === 'Error' ? 'error' : 'warning',
+        tag: r.status === 'Error' ? 'validation-error' : 'mismatch',
+        text: `[step6] ${r.employeeId} ${r.employeeName} ${r.status === 'Error' ? 'Validation Error' : `diff=${Number(r.difference ?? 0).toFixed(2)}`}`,
+        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
+        source: 'step6',
+        meta: {
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          department: r.department,
+          monthsOfService: r.monthsOfService,
+          isEligible: r.isEligible,
+          percentage: r.percentage,
+          grossSalarySoftware: r.grossSalarySoftware,
+          registerSoftware: r.registerSoftware,
+          registerHR: r.registerHR,
+          unpaidSoftware: r.unpaidSoftware,
+          unpaidHR: r.unpaidHR,
+          hrOccurrences: r.hrOccurrences,
+          diff: r.difference,
+          status: r.status,
+          validationError: r.validationError || null,
+          tolerance: TOLERANCE_STEP6,
+        },
+      });
+    }
+  }
+  return items;
+}
+
+function buildStep6SummaryMessage(rows: any[]) {
+  const total = rows.length || 0;
+  const matches = rows.filter((r) => r.status === 'Match').length;
+  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+  const errors = rows.filter((r) => r.status === 'Error').length;
+
+  const staffRows = rows.filter((r) => r.department === 'Staff');
+  const workerRows = rows.filter((r) => r.department === 'Worker');
+
+  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch' || r.status === 'Error').length;
+  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch' || r.status === 'Error').length;
+
+  const eligible = rows.filter((r) => r.isEligible).length;
+  const notEligible = rows.filter((r) => !r.isEligible).length;
+  const duplicates = rows.filter((r) => r.hrOccurrences > 1).length;
+
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const staffRegSWSum = sum(staffRows.map((r) => Number(r.registerSoftware || 0)));
+  const staffRegHRSum = sum(staffRows.map((r) => Number(r.registerHR || 0)));
+  const staffUnpaidSWSum = sum(staffRows.map((r) => Number(r.unpaidSoftware || 0)));
+  const staffUnpaidHRSum = sum(staffRows.map((r) => Number(r.unpaidHR || 0)));
+
+  const workerRegSWSum = sum(workerRows.map((r) => Number(r.registerSoftware || 0)));
+  const workerRegHRSum = sum(workerRows.map((r) => Number(r.registerHR || 0)));
+  const workerUnpaidSWSum = sum(workerRows.map((r) => Number(r.unpaidSoftware || 0)));
+  const workerUnpaidHRSum = sum(workerRows.map((r) => Number(r.unpaidHR || 0)));
+
+  return {
+    level: 'info',
+    tag: 'summary',
+    text: `Step6 run: total=${total} match=${matches} mismatch=${mismatches} error=${errors}`,
+    scope: 'global',
+    source: 'step6',
+    meta: {
+      totals: { total, matches, mismatches, errors, eligible, notEligible, duplicates, tolerance: TOLERANCE_STEP6 },
+      staff: {
+        count: staffRows.length,
+        issues: staffMismatch,
+        registerSWSum: staffRegSWSum,
+        registerHRSum: staffRegHRSum,
+        unpaidSWSum: staffUnpaidSWSum,
+        unpaidHRSum: staffUnpaidHRSum,
+      },
+      worker: {
+        count: workerRows.length,
+        issues: workerMismatch,
+        registerSWSum: workerRegSWSum,
+        registerHRSum: workerRegHRSum,
+        unpaidSWSum: workerUnpaidSWSum,
+        unpaidHRSum: workerUnpaidHRSum,
+      },
+    },
+  };
+}
+
+async function handleSaveAuditStep6(rows: any[]) {
+  if (!rows || rows.length === 0) return;
+  const items = [buildStep6SummaryMessage(rows), ...buildStep6MismatchMessages(rows)];
+  if (items.length === 0) return;
+  await postAuditMessagesStep6(items);
+}
+
+// Stable hash for run signature
+function djb2Hash(str: string) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function buildRunKeyStep6(rows: any[]) {
+  const sig = rows
+    .map(r =>
+      `${r.employeeId}|${r.department}|${Number(r.unpaidSoftware)||0}|${Number(r.unpaidHR)||0}|${Number(r.difference)||0}|${r.status}|${r.isEligible}`
+    )
+    .join(';');
+  return djb2Hash(sig);
+}
+
+useEffect(() => {
+  if (typeof window === 'undefined') return; // SSR guard
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep6(comparisonData);
+  const markerKey = `audit_step6_${runKey}`;
+
+  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+
+  sessionStorage.setItem(markerKey, '1');
+  const deterministicBatchId = `step6-${runKey}`;
+
+  const items = [buildStep6SummaryMessage(comparisonData), ...buildStep6MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep6(items, deterministicBatchId).catch(err => {
+    console.error('Auto-audit step6 failed', err);
+    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+  });
+}, [comparisonData]);
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const batchId = `step6-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const items = [buildStep6SummaryMessage(comparisonData), ...buildStep6MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep6(items, batchId).catch(err => console.error('Auto-audit step6 failed', err));
+}, [comparisonData]);
+
+
+
   type FileSlot = { type: string; file: File | null };
 
   const pickFile = (pred: (s: FileSlot) => boolean): File | null => {

@@ -98,8 +98,7 @@ export default function Step8Page() {
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
 
   const TOLERANCE = 12;
-
-  const REGISTER_PERCENTAGE = 8.33; // Fixed for Register calculation
+  const REGISTER_PERCENTAGE = 8.33;
 
   const calculatePercentageByMonths = (monthsWorked: number): number => {
     if (monthsWorked < 12) {
@@ -186,6 +185,133 @@ export default function Step8Page() {
     }
   };
 
+  // === Step 8 Audit Helpers ===
+  async function postAuditMessagesStep8(items: any[], batchId?: string) {
+    const bid =
+      batchId ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: bid, step: 8, items }),
+    });
+    return bid;
+  }
+
+  function buildStep8MismatchMessages(rows: any[]) {
+    const items: any[] = [];
+    for (const r of rows) {
+      if (r?.status === "Mismatch") {
+        items.push({
+          level: "error",
+          tag: "mismatch",
+          text: `[step8] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
+          scope: r.department === "Staff" ? "staff" : r.department === "Worker" ? "worker" : "global",
+          source: "step8",
+          meta: {
+            employeeId: r.employeeId,
+            name: r.employeeName,
+            department: r.department,
+            grossSal: r.grossSal,
+            excludedOctober: r.excludedOctober,
+            registerPercentage: r.registerPercentage,
+            actualPercentage: r.actualPercentage,
+            percentageSource: r.percentageSource,
+            registerCalculated: r.registerCalculated,
+            actualCalculated: r.actualCalculated,
+            reimCalculated: r.reimCalculated,
+            reimHR: r.reimHR,
+            diff: r.difference,
+            tolerance: TOLERANCE,
+          },
+        });
+      }
+    }
+    return items;
+  }
+
+  function buildStep8SummaryMessage(rows: any[]) {
+    const total = rows.length || 0;
+    const matches = rows.filter((r) => r.status === "Match").length;
+    const mismatches = rows.filter((r) => r.status === "Mismatch").length;
+
+    const staffRows = rows.filter((r) => r.department === "Staff");
+    const workerRows = rows.filter((r) => r.department === "Worker");
+
+    const staffMismatch = staffRows.filter((r) => r.status === "Mismatch").length;
+    const workerMismatch = workerRows.filter((r) => r.status === "Mismatch").length;
+
+    const customPercentageCount = rows.filter((r) => r.percentageSource === "Custom").length;
+    const zeroOctoberCount = rows.filter((r) => r.excludedOctober).length;
+
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
+    const staffRegisterSum = sum(staffRows.map((r) => Number(r.registerCalculated || 0)));
+    const staffActualSum = sum(staffRows.map((r) => Number(r.actualCalculated || 0)));
+    const staffReimCalcSum = sum(staffRows.map((r) => Number(r.reimCalculated || 0)));
+    const staffReimHRSum = sum(staffRows.map((r) => Number(r.reimHR || 0)));
+
+    const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSal || 0)));
+    const workerRegisterSum = sum(workerRows.map((r) => Number(r.registerCalculated || 0)));
+    const workerActualSum = sum(workerRows.map((r) => Number(r.actualCalculated || 0)));
+    const workerReimCalcSum = sum(workerRows.map((r) => Number(r.reimCalculated || 0)));
+    const workerReimHRSum = sum(workerRows.map((r) => Number(r.reimHR || 0)));
+
+    return {
+      level: "info",
+      tag: "summary",
+      text: `Step8 run: total=${total} match=${matches} mismatch=${mismatches}`,
+      scope: "global",
+      source: "step8",
+      meta: {
+        totals: {
+          total,
+          matches,
+          mismatches,
+          tolerance: TOLERANCE,
+          customPercentageCount,
+          zeroOctoberCount,
+        },
+        staff: {
+          count: staffRows.length,
+          mismatches: staffMismatch,
+          grossSalSum: staffGrossSalSum,
+          registerSum: staffRegisterSum,
+          actualSum: staffActualSum,
+          reimCalcSum: staffReimCalcSum,
+          reimHRSum: staffReimHRSum,
+        },
+        worker: {
+          count: workerRows.length,
+          mismatches: workerMismatch,
+          grossSalSum: workerGrossSalSum,
+          registerSum: workerRegisterSum,
+          actualSum: workerActualSum,
+          reimCalcSum: workerReimCalcSum,
+          reimHRSum: workerReimHRSum,
+        },
+      },
+    };
+  }
+
+  // ✅ Audit useEffect at component top level
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+    const batchId = `step8-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const items = [
+      buildStep8SummaryMessage(comparisonData),
+      ...buildStep8MismatchMessages(comparisonData),
+    ];
+
+    postAuditMessagesStep8(items, batchId).catch((err) =>
+      console.error("Auto-audit step8 failed", err)
+    );
+  }, [comparisonData]);
+
   const processFiles = async () => {
     if (!staffFile || !bonusFile) {
       setError("Both Staff file and Bonus Calculation file are required");
@@ -200,7 +326,6 @@ export default function Step8Page() {
       console.log("📊 STEP 8: Reimbursement with Custom Percentages");
       console.log("=".repeat(60));
 
-      // ========== STEP 0: LOAD ACTUAL PERCENTAGE FILE ==========
       const customPercentageMap = new Map<number, number>();
       const zeroOctoberEmployees = new Set<number>();
 
@@ -209,7 +334,6 @@ export default function Step8Page() {
         const percentageBuffer = await actualPercentageFile.arrayBuffer();
         const percentageWorkbook = XLSX.read(percentageBuffer);
 
-        // Load "Per" sheet - custom percentages for ACTUAL
         const perSheet = percentageWorkbook.Sheets["Per"];
         if (perSheet) {
           const perData: any[][] = XLSX.utils.sheet_to_json(perSheet, {
@@ -221,8 +345,8 @@ export default function Step8Page() {
             const row = perData[i];
             if (!row || row.length === 0) continue;
 
-            const empCode = Number(row[1]); // Column B
-            const bonusPercentage = Number(row[4]); // Column E
+            const empCode = Number(row[1]);
+            const bonusPercentage = Number(row[4]);
 
             if (empCode && !isNaN(empCode) && bonusPercentage && !isNaN(bonusPercentage)) {
               customPercentageMap.set(empCode, bonusPercentage);
@@ -231,7 +355,6 @@ export default function Step8Page() {
           }
         }
 
-        // Load "Average" sheet - zero October employees
         const avgSheet = percentageWorkbook.Sheets["Average"];
         if (avgSheet) {
           const avgData: any[][] = XLSX.utils.sheet_to_json(avgSheet, {
@@ -258,7 +381,6 @@ export default function Step8Page() {
         console.log("\n⚠️ Actual Percentage file not found - using calculated percentages");
       }
 
-      // ========== STEP 1: LOAD BONUS FILE - GET REIM (HR) ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
@@ -340,7 +462,6 @@ export default function Step8Page() {
 
       console.log(`\n✅ Bonus data loaded: ${hrReimDataMap.size} employees`);
 
-      // ========== STEP 2: PROCESS STAFF FILE TO CALCULATE GROSS SAL ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
 
@@ -431,7 +552,6 @@ export default function Step8Page() {
 
       console.log(`\n✅ Staff data extracted: ${staffEmployees.size} employees`);
 
-      // ========== STEP 3: CALCULATE GROSS SAL WITH CONDITIONAL OCTOBER ==========
       const softwareEmployeesData: Map<
         number,
         {
@@ -481,7 +601,6 @@ export default function Step8Page() {
 
       console.log(`\n✅ GROSS SAL calculated: ${softwareEmployeesData.size} employees`);
 
-      // ========== STEP 4: CALCULATE REGISTER, ACTUAL, AND REIMBURSEMENT ==========
       const comparison: any[] = [];
 
       for (const [empId, softwareData] of softwareEmployeesData) {
@@ -489,7 +608,6 @@ export default function Step8Page() {
         
         const monthsFromDOJ = calculateMonthsFromDOJ(softwareData.dateOfJoining);
         
-        // ✅ Use custom percentage if available, otherwise calculate
         let percentageForActual: number;
         let percentageSource: string;
         
@@ -502,10 +620,8 @@ export default function Step8Page() {
           percentageSource = "Calculated";
         }
         
-        // Register always uses 8.33%
         const registerCalculated = (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
 
-        // Actual uses custom or calculated percentage
         const gross2 = calculateGross2(softwareData.grossSal, percentageForActual);
         const actualCalculated = calculateActual(
           softwareData.grossSal,
@@ -513,7 +629,6 @@ export default function Step8Page() {
           percentageForActual
         );
 
-        // Reimbursement = Register - Actual
         const reimCalculated = registerCalculated - actualCalculated;
         const reimHR = hrData?.reimHR || 0;
 
@@ -702,7 +817,6 @@ export default function Step8Page() {
             </div>
           </div>
 
-          {/* Formula Explanation */}
           <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
             <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
               <svg
@@ -741,9 +855,6 @@ export default function Step8Page() {
                 <p className="ml-4 text-purple-800">
                   Employees in "Per" sheet use their specified percentage for <strong>ACTUAL calculation</strong>
                 </p>
-                <p className="ml-4 text-purple-800 text-sm mt-1">
-                  Example: Employee 143 & 914 both have 12% for ACTUAL
-                </p>
               </div>
 
               <div className="bg-orange-50 border border-orange-200 rounded p-3">
@@ -751,14 +862,6 @@ export default function Step8Page() {
                 <p className="ml-4 text-orange-800">
                   Employees in "Average" sheet have <strong>October estimate = 0</strong>
                 </p>
-              </div>
-
-              <div className="bg-green-50 border border-green-200 rounded p-3">
-                <p className="font-semibold text-green-900 mb-1">⚠️ Percentage Rules:</p>
-                <ul className="list-disc ml-8 mt-1 text-green-800">
-                  <li><strong>Register:</strong> Always 8.33% (fixed)</li>
-                  <li><strong>Actual:</strong> Custom from "Per" sheet OR calculated from DOJ</li>
-                </ul>
               </div>
             </div>
           </div>

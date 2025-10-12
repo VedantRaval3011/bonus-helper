@@ -13,6 +13,173 @@ export default function Step7Page() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // === Step 7 Audit Helpers ===
+const TOLERANCE_STEP7 = 12; // Step 7 uses ±12 to mark Match vs Mismatch
+
+async function postAuditMessagesStep7(items: any[], batchId?: string) {
+  const bid =
+    batchId ||
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: bid, step: 7, items }),
+  });
+  return bid;
+}
+
+function buildStep7MismatchMessages(rows: any[]) {
+  // Expecting rows with: { employeeId, employeeName, department, dateOfJoining, percentage, percentageSource, grossSal, octoberEstimate, gross2, actualCalculated, actualHR, actualHRCount, difference, status }
+  const items: any[] = [];
+  for (const r of rows) {
+    if (r?.status === 'Mismatch') {
+      items.push({
+        level: 'error',
+        tag: 'mismatch',
+        text: `[step7] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
+        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
+        source: 'step7',
+        meta: {
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          department: r.department,
+          dateOfJoining: r.dateOfJoining,
+          percentage: r.percentage,
+          percentageSource: r.percentageSource,
+          octoberEstimate: r.octoberEstimate,
+          grossSal: r.grossSal,
+          gross2: r.gross2,
+          actualCalculated: r.actualCalculated,
+          actualHR: r.actualHR,
+          actualHRCount: r.actualHRCount,
+          diff: r.difference,
+          tolerance: TOLERANCE_STEP7,
+        },
+      });
+    }
+  }
+  return items;
+}
+
+function buildStep7SummaryMessage(rows: any[]) {
+  const total = rows.length || 0;
+  const matches = rows.filter((r) => r.status === 'Match').length;
+  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+
+  const staffRows = rows.filter((r) => r.department === 'Staff');
+  const workerRows = rows.filter((r) => r.department === 'Worker');
+
+  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
+  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
+
+  const customPercentageCount = rows.filter((r) => r.percentageSource === 'Custom').length;
+  const zeroOctoberCount = rows.filter((r) => r.octoberEstimate === 0).length;
+  const duplicateHRCount = rows.filter((r) => r.actualHRCount > 1).length;
+
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
+  const staffGross2Sum = sum(staffRows.map((r) => Number(r.gross2 || 0)));
+  const staffActualCalcSum = sum(staffRows.map((r) => Number(r.actualCalculated || 0)));
+  const staffActualHRSum = sum(staffRows.map((r) => Number(r.actualHR || 0)));
+
+  const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSal || 0)));
+  const workerGross2Sum = sum(workerRows.map((r) => Number(r.gross2 || 0)));
+  const workerActualCalcSum = sum(workerRows.map((r) => Number(r.actualCalculated || 0)));
+  const workerActualHRSum = sum(workerRows.map((r) => Number(r.actualHR || 0)));
+
+  return {
+    level: 'info',
+    tag: 'summary',
+    text: `Step7 run: total=${total} match=${matches} mismatch=${mismatches}`,
+    scope: 'global',
+    source: 'step7',
+    meta: {
+      totals: {
+        total,
+        matches,
+        mismatches,
+        tolerance: TOLERANCE_STEP7,
+        customPercentageCount,
+        zeroOctoberCount,
+        duplicateHRCount,
+      },
+      staff: {
+        count: staffRows.length,
+        mismatches: staffMismatch,
+        grossSalSum: staffGrossSalSum,
+        gross2Sum: staffGross2Sum,
+        actualCalcSum: staffActualCalcSum,
+        actualHRSum: staffActualHRSum,
+      },
+      worker: {
+        count: workerRows.length,
+        mismatches: workerMismatch,
+        grossSalSum: workerGrossSalSum,
+        gross2Sum: workerGross2Sum,
+        actualCalcSum: workerActualCalcSum,
+        actualHRSum: workerActualHRSum,
+      },
+    },
+  };
+}
+
+async function handleSaveAuditStep7(rows: any[]) {
+  if (!rows || rows.length === 0) return;
+  const items = [buildStep7SummaryMessage(rows), ...buildStep7MismatchMessages(rows)];
+  if (items.length === 0) return;
+  await postAuditMessagesStep7(items);
+}
+
+// Stable hash for run signature
+function djb2Hash(str: string) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function buildRunKeyStep7(rows: any[]) {
+  const sig = rows
+    .map(r =>
+      `${r.employeeId}|${r.department}|${Number(r.grossSal)||0}|${Number(r.actualCalculated)||0}|${Number(r.actualHR)||0}|${Number(r.difference)||0}|${r.status}|${r.percentageSource}`
+    )
+    .join(';');
+  return djb2Hash(sig);
+}
+
+useEffect(() => {
+  if (typeof window === 'undefined') return; // SSR guard
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep7(comparisonData);
+  const markerKey = `audit_step7_${runKey}`;
+
+  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+
+  sessionStorage.setItem(markerKey, '1');
+  const deterministicBatchId = `step7-${runKey}`;
+
+  const items = [buildStep7SummaryMessage(comparisonData), ...buildStep7MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep7(items, deterministicBatchId).catch(err => {
+    console.error('Auto-audit step7 failed', err);
+    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+  });
+}, [comparisonData]);
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const batchId = `step7-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const items = [buildStep7SummaryMessage(comparisonData), ...buildStep7MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep7(items, batchId).catch(err => console.error('Auto-audit step7 failed', err));
+}, [comparisonData]);
+
+
+
   type FileSlot = { type: string; file: File | null };
 
   const pickFile = (pred: (s: FileSlot) => boolean): File | null => {

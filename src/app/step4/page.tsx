@@ -244,6 +244,17 @@ useEffect(() => {
   });
 }, [comparisonData]);
 
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const batchId = `step4-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const items = [buildStep4SummaryMessage(comparisonData), ...buildStep4MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep4(items, batchId).catch(err => console.error('Auto-audit step4 failed', err));
+}, [comparisonData]);
+
+
 
   // **CORRECTED PERCENTAGE CALCULATION** - Calculate based on current date (Oct 12, 2025)
   const calculatePercentage = (dateOfJoining: any): number => {

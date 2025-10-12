@@ -15,6 +15,174 @@ export default function Step9Page() {
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
 
+  // === Step 9 Audit Helpers ===
+const TOLERANCE_STEP9 = 12; // Step 9 uses ±12 to mark Match vs Mismatch
+
+async function postAuditMessagesStep9(items: any[], batchId?: string) {
+  const bid =
+    batchId ||
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: bid, step: 9, items }),
+  });
+  return bid;
+}
+
+function buildStep9MismatchMessages(rows: any[]) {
+  // Expecting rows with: { employeeId, employeeName, department, monthsOfService, isEligible, percentage, grossSalarySoftware, registerSoftware, unpaidSoftware, loanDeduction, finalRTGSSoftware, finalRTGSHR, hrSheets, difference, status }
+  const items: any[] = [];
+  for (const r of rows) {
+    if (r?.status === 'Mismatch') {
+      items.push({
+        level: 'error',
+        tag: 'mismatch',
+        text: `[step9] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
+        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
+        source: 'step9',
+        meta: {
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          department: r.department,
+          monthsOfService: r.monthsOfService,
+          isEligible: r.isEligible,
+          percentage: r.percentage,
+          grossSalarySoftware: r.grossSalarySoftware,
+          registerSoftware: r.registerSoftware,
+          unpaidSoftware: r.unpaidSoftware,
+          loanDeduction: r.loanDeduction,
+          finalRTGSSoftware: r.finalRTGSSoftware,
+          finalRTGSHR: r.finalRTGSHR,
+          hrSheets: r.hrSheets,
+          hrSheetCount: r.hrSheets?.length || 0,
+          diff: r.difference,
+          tolerance: TOLERANCE_STEP9,
+        },
+      });
+    }
+  }
+  return items;
+}
+
+function buildStep9SummaryMessage(rows: any[]) {
+  const total = rows.length || 0;
+  const matches = rows.filter((r) => r.status === 'Match').length;
+  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+
+  const staffRows = rows.filter((r) => r.department === 'Staff');
+  const workerRows = rows.filter((r) => r.department === 'Worker');
+
+  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
+  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
+
+  const eligible = rows.filter((r) => r.isEligible).length;
+  const notEligible = rows.filter((r) => !r.isEligible).length;
+  const multiSheetCount = rows.filter((r) => r.hrSheets?.length > 1).length;
+  const specialPercentageCount = rows.filter((r) => r.percentage === 12.0).length;
+
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSalarySoftware || 0)));
+  const staffRegisterSum = sum(staffRows.map((r) => Number(r.registerSoftware || 0)));
+  const staffUnpaidSum = sum(staffRows.map((r) => Number(r.unpaidSoftware || 0)));
+  const staffLoanSum = sum(staffRows.map((r) => Number(r.loanDeduction || 0)));
+  const staffFinalRTGSSWSum = sum(staffRows.map((r) => Number(r.finalRTGSSoftware || 0)));
+  const staffFinalRTGSHRSum = sum(staffRows.map((r) => Number(r.finalRTGSHR || 0)));
+
+  const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSalarySoftware || 0)));
+  const workerRegisterSum = sum(workerRows.map((r) => Number(r.registerSoftware || 0)));
+  const workerUnpaidSum = sum(workerRows.map((r) => Number(r.unpaidSoftware || 0)));
+  const workerLoanSum = sum(workerRows.map((r) => Number(r.loanDeduction || 0)));
+  const workerFinalRTGSSWSum = sum(workerRows.map((r) => Number(r.finalRTGSSoftware || 0)));
+  const workerFinalRTGSHRSum = sum(workerRows.map((r) => Number(r.finalRTGSHR || 0)));
+
+  return {
+    level: 'info',
+    tag: 'summary',
+    text: `Step9 run: total=${total} match=${matches} mismatch=${mismatches}`,
+    scope: 'global',
+    source: 'step9',
+    meta: {
+      totals: {
+        total,
+        matches,
+        mismatches,
+        tolerance: TOLERANCE_STEP9,
+        eligible,
+        notEligible,
+        multiSheetCount,
+        specialPercentageCount,
+      },
+      staff: {
+        count: staffRows.length,
+        mismatches: staffMismatch,
+        grossSalSum: staffGrossSalSum,
+        registerSum: staffRegisterSum,
+        unpaidSum: staffUnpaidSum,
+        loanSum: staffLoanSum,
+        finalRTGSSWSum: staffFinalRTGSSWSum,
+        finalRTGSHRSum: staffFinalRTGSHRSum,
+      },
+      worker: {
+        count: workerRows.length,
+        mismatches: workerMismatch,
+        grossSalSum: workerGrossSalSum,
+        registerSum: workerRegisterSum,
+        unpaidSum: workerUnpaidSum,
+        loanSum: workerLoanSum,
+        finalRTGSSWSum: workerFinalRTGSSWSum,
+        finalRTGSHRSum: workerFinalRTGSHRSum,
+      },
+    },
+  };
+}
+
+async function handleSaveAuditStep9(rows: any[]) {
+  if (!rows || rows.length === 0) return;
+  const items = [buildStep9SummaryMessage(rows), ...buildStep9MismatchMessages(rows)];
+  if (items.length === 0) return;
+  await postAuditMessagesStep9(items);
+}
+
+// Stable hash for run signature
+function djb2Hash(str: string) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function buildRunKeyStep9(rows: any[]) {
+  const sig = rows
+    .map(r =>
+      `${r.employeeId}|${r.department}|${Number(r.finalRTGSSoftware)||0}|${Number(r.finalRTGSHR)||0}|${Number(r.difference)||0}|${r.status}|${r.hrSheets?.length||0}`
+    )
+    .join(';');
+  return djb2Hash(sig);
+}
+
+useEffect(() => {
+  if (typeof window === 'undefined') return; // SSR guard
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep9(comparisonData);
+  const markerKey = `audit_step9_${runKey}`;
+
+  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+
+  sessionStorage.setItem(markerKey, '1');
+  const deterministicBatchId = `step9-${runKey}`;
+
+  const items = [buildStep9SummaryMessage(comparisonData), ...buildStep9MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep9(items, deterministicBatchId).catch(err => {
+    console.error('Auto-audit step9 failed', err);
+    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+  });
+}, [comparisonData]);
+
+
   type FileSlot = { type: string; file: File | null };
 
   const pickFile = (pred: (s: FileSlot) => boolean): File | null => {
@@ -184,6 +352,42 @@ export default function Step9Page() {
 
     return null;
   }
+
+  // Step 9 example - apply same pattern to Steps 2-8
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep9(comparisonData);
+  // Use a session + mount counter to track per-navigation instead of per-data-hash
+  const mountId = sessionStorage.getItem('step9_mount_id') || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  if (!sessionStorage.getItem('step9_mount_id')) {
+    sessionStorage.setItem('step9_mount_id', mountId);
+  }
+  
+  const markerKey = `audit_step9_${mountId}_${runKey}`;
+
+  if (sessionStorage.getItem(markerKey)) return; // already logged this mount + data combo
+
+  sessionStorage.setItem(markerKey, '1');
+  const deterministicBatchId = `step9-${mountId}-${runKey}`;
+
+  const items = [buildStep9SummaryMessage(comparisonData), ...buildStep9MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep9(items, deterministicBatchId).catch(err => {
+    console.error('Auto-audit step9 failed', err);
+    sessionStorage.removeItem(markerKey);
+  });
+}, [comparisonData]);
+
+// Clear mount ID on unmount so next navigation gets a fresh ID
+useEffect(() => {
+  return () => {
+    sessionStorage.removeItem('step9_mount_id');
+  };
+}, []);
+
 
   // ✅ CORRECTED: Proper month calculation that handles all edge cases
   function monthsBetween(start: Date, end: Date): number {
@@ -962,7 +1166,7 @@ export default function Step9Page() {
         Loan: row.loanDeduction,
         "Final RTGS (Software)": row.finalRTGSSoftware,
         "Final RTGS (HR)": row.finalRTGSHR,
-        "HR Sheets": row.hrSheets.join(", "),
+        "HR duplicates": row.hrSheets.join(", "),
         Difference: row.difference,
         Status: row.status,
       }))
@@ -1295,7 +1499,7 @@ export default function Step9Page() {
                         Final RTGS (HR)
                       </th>
                       <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
-                        HR Sheets
+                        HR Duplicates
                       </th>
                       <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
                         Diff
@@ -1383,7 +1587,7 @@ export default function Step9Page() {
                             title={row.hrSheets.join(", ")}
                           >
                             {row.hrSheets.length > 1
-                              ? `${row.hrSheets.length} sheets`
+                              ? `${row.hrSheets.length}`
                               : row.hrSheets[0] || "N/A"}
                           </span>
                         </td>

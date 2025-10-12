@@ -14,6 +14,152 @@ export default function Step5Page() {
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
 
+  // === Step 5 Audit Helpers ===
+const TOLERANCE_STEP5 = 12; // Step 5 uses ±12 to mark Match vs Mismatch
+
+async function postAuditMessagesStep5(items: any[], batchId?: string) {
+  const bid =
+    batchId ||
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2));
+  await fetch('/api/audit/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: bid, step: 5, items }),
+  });
+  return bid;
+}
+
+function buildStep5MismatchMessages(rows: any[]) {
+  // Expecting rows with: { employeeId, employeeName, department, percentage, grossSal, calculatedValue, gross2HR, difference, status, dateOfJoining }
+  const items: any[] = [];
+  for (const r of rows) {
+    if (r?.status === 'Mismatch') {
+      items.push({
+        level: 'error',
+        tag: 'mismatch',
+        text: `[step5] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
+        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
+        source: 'step5',
+        meta: {
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          department: r.department,
+          dateOfJoining: r.dateOfJoining,
+          percentage: r.percentage,
+          grossSal: r.grossSal,
+          calculatedValue: r.calculatedValue,
+          gross2HR: r.gross2HR,
+          diff: r.difference,
+          tolerance: TOLERANCE_STEP5,
+        },
+      });
+    }
+  }
+  return items;
+}
+
+function buildStep5SummaryMessage(rows: any[]) {
+  const total = rows.length || 0;
+  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+  const matches = total - mismatches;
+
+  const staffRows = rows.filter((r) => r.department === 'Staff');
+  const workerRows = rows.filter((r) => r.department === 'Worker');
+
+  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
+  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
+
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
+  const staffCalcSum = sum(staffRows.map((r) => Number(r.calculatedValue || 0)));
+  const staffHRSum = sum(staffRows.map((r) => Number(r.gross2HR || 0)));
+
+  const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSal || 0)));
+  const workerCalcSum = sum(workerRows.map((r) => Number(r.calculatedValue || 0)));
+  const workerHRSum = sum(workerRows.map((r) => Number(r.gross2HR || 0)));
+
+  return {
+    level: 'info',
+    tag: 'summary',
+    text: `Step5 run: total=${total} match=${matches} mismatch=${mismatches}`,
+    scope: 'global',
+    source: 'step5',
+    meta: {
+      totals: { total, matches, mismatches, tolerance: TOLERANCE_STEP5 },
+      staff: {
+        count: staffRows.length,
+        mismatches: staffMismatch,
+        grossSalSum: staffGrossSalSum,
+        calculatedSum: staffCalcSum,
+        hrGross2Sum: staffHRSum,
+      },
+      worker: {
+        count: workerRows.length,
+        mismatches: workerMismatch,
+        grossSalSum: workerGrossSalSum,
+        calculatedSum: workerCalcSum,
+        hrGross2Sum: workerHRSum,
+      },
+    },
+  };
+}
+
+async function handleSaveAuditStep5(rows: any[]) {
+  if (!rows || rows.length === 0) return;
+  const items = [buildStep5SummaryMessage(rows), ...buildStep5MismatchMessages(rows)];
+  if (items.length === 0) return;
+  await postAuditMessagesStep5(items);
+}
+// Stable hash for run signature
+function djb2Hash(str: string) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+function buildRunKeyStep5(rows: any[]) {
+  const sig = rows
+    .map(r =>
+      `${r.employeeId}|${r.department}|${Number(r.grossSal)||0}|${Number(r.calculatedValue)||0}|${Number(r.gross2HR)||0}|${Number(r.difference)||0}|${r.status}`
+    )
+    .join(';');
+  return djb2Hash(sig);
+}
+
+useEffect(() => {
+  if (typeof window === 'undefined') return; // SSR guard
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const runKey = buildRunKeyStep5(comparisonData);
+  const markerKey = `audit_step5_${runKey}`;
+
+  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+
+  sessionStorage.setItem(markerKey, '1');
+  const deterministicBatchId = `step5-${runKey}`;
+
+  const items = [buildStep5SummaryMessage(comparisonData), ...buildStep5MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep5(items, deterministicBatchId).catch(err => {
+    console.error('Auto-audit step5 failed', err);
+    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+  });
+}, [comparisonData]);
+
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+  const batchId = `step5-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const items = [buildStep5SummaryMessage(comparisonData), ...buildStep5MismatchMessages(comparisonData)];
+
+  postAuditMessagesStep5(items, batchId).catch(err => console.error('Auto-audit step5 failed', err));
+}, [comparisonData]);
+
+
+
   type FileSlot = { type: string; file: File | null };
 
   const pickFile = (pred: (s: FileSlot) => boolean): File | null => {
