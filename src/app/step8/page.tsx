@@ -12,6 +12,13 @@ export default function Step8Page() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLogicMinimized, setIsLogicMinimized] = useState(true);
+
+  // 🎯 NEW: Sorting state
+  const [sortConfig, setSortConfig] = useState<{
+    key: string | null;
+    direction: "asc" | "desc" | null;
+  }>({ key: null, direction: null });
 
   type FileSlot = { type: string; file: File | null };
 
@@ -342,7 +349,6 @@ export default function Step8Page() {
     };
   }
 
-  // ✅ Audit useEffect at component top level
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
@@ -769,6 +775,79 @@ export default function Step8Page() {
     }
   }, [staffFile, bonusFile, actualPercentageFile]);
 
+  // 🎯 NEW: Sorting logic
+  useEffect(() => {
+    let sorted = [...comparisonData];
+
+    if (sortConfig.key && sortConfig.direction) {
+      sorted.sort((a, b) => {
+        const aValue = a[sortConfig.key!];
+        const bValue = b[sortConfig.key!];
+
+        let comparison = 0;
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === "string" && typeof bValue === "string") {
+          comparison = aValue.localeCompare(bValue);
+        } else if (typeof aValue === "boolean" && typeof bValue === "boolean") {
+          comparison = aValue === bValue ? 0 : aValue ? 1 : -1;
+        }
+
+        return sortConfig.direction === "asc" ? comparison : -comparison;
+      });
+    }
+
+    setFilteredData(sorted);
+  }, [comparisonData, sortConfig]);
+
+  // 🎯 NEW: Handle column sorting
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" = "asc";
+
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === "asc") {
+        direction = "desc";
+      } else if (sortConfig.direction === "desc") {
+        setSortConfig({ key: null, direction: null });
+        return;
+      }
+    }
+
+    setSortConfig({ key, direction });
+  };
+
+  // 🎯 NEW: Sort icon component
+  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+    const isActive = sortConfig.key === columnKey;
+
+    return (
+      <div className="inline-flex flex-col ml-1">
+        <svg
+          className={`w-3 h-3 ${
+            isActive && sortConfig.direction === "asc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M5 10l5-5 5 5H5z" />
+        </svg>
+        <svg
+          className={`w-3 h-3 -mt-1 ${
+            isActive && sortConfig.direction === "desc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M15 10l-5 5-5-5h10z" />
+        </svg>
+      </div>
+    );
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -918,75 +997,100 @@ export default function Step8Page() {
               </button>
             </div>
           </div>
-
-          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Reimbursement Calculation Logic
-            </h3>
-            <div className="text-sm text-blue-800 space-y-3">
-              <div>
-                <p className="font-semibold mb-1">Formula:</p>
-                <p className="ml-4 text-lg">
-                  <strong>Reimbursement = Register - Actual</strong>
-                </p>
-              </div>
-
-              <div>
-                <p className="font-semibold mb-1">Calculation Steps:</p>
-                <ul className="list-disc ml-8 space-y-1">
-                  <li>
-                    <strong>GROSS SAL:</strong> Sum of monthly SALARY1 + October
-                    estimate
-                  </li>
-                  <li>
-                    <strong>Register:</strong> GROSS SAL × 8.33% (fixed for all
-                    employees)
-                  </li>
-                  <li>
-                    <strong>Actual:</strong> Calculated using custom or
-                    DOJ-based percentage
-                  </li>
-                  <li>
-                    <strong>Reimbursement:</strong> Register - Actual
-                  </li>
-                </ul>
-              </div>
-
-              <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-3">
-                <p className="font-semibold text-purple-900 mb-1">
-                  🎯 Custom Percentage (ACTUAL only):
-                </p>
-                <p className="ml-4 text-purple-800">
-                  Employees in "Per" sheet use their specified percentage for{" "}
-                  <strong>ACTUAL calculation</strong>
-                </p>
-              </div>
-
-              <div className="bg-orange-50 border border-orange-200 rounded p-3">
-                <p className="font-semibold text-orange-900 mb-1">
-                  🔴 October Exclusion Rule:
-                </p>
-                <p className="ml-4 text-orange-800">
-                  Employees in "Average" sheet have{" "}
-                  <strong>October estimate = 0</strong>
-                </p>
-              </div>
+          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+            <div
+              className="flex justify-between items-center p-4 cursor-pointer hover:bg-blue-100 transition-colors"
+              onClick={() => setIsLogicMinimized(!isLogicMinimized)}
+            >
+              <h3 className="font-bold text-blue-900 flex items-center gap-2">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                Reimbursement Calculation Logic
+              </h3>
+              <button className="text-blue-600 hover:text-blue-800 transition-colors">
+                <svg
+                  className={`w-5 h-5 transition-transform duration-200 ${
+                    isLogicMinimized ? "" : "rotate-180"
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 15l7-7 7 7"
+                  />
+                </svg>
+              </button>
             </div>
-          </div>
 
+            {!isLogicMinimized && (
+              <div className="px-6 pb-6">
+                <div className="text-sm text-blue-800 space-y-3">
+                  <div>
+                    <p className="font-semibold mb-1">Formula:</p>
+                    <p className="ml-4 text-lg">
+                      <strong>Reimbursement = Register - Actual</strong>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="font-semibold mb-1">Calculation Steps:</p>
+                    <ul className="list-disc ml-8 space-y-1">
+                      <li>
+                        <strong>GROSS SAL:</strong> Sum of monthly SALARY1 +
+                        October estimate
+                      </li>
+                      <li>
+                        <strong>Register:</strong> GROSS SAL × 8.33% (fixed for
+                        all employees)
+                      </li>
+                      <li>
+                        <strong>Actual:</strong> Calculated using custom or
+                        DOJ-based percentage
+                      </li>
+                      <li>
+                        <strong>Reimbursement:</strong> Register - Actual
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-3">
+                    <p className="font-semibold text-purple-900 mb-1">
+                      🎯 Custom Percentage (ACTUAL only):
+                    </p>
+                    <p className="ml-4 text-purple-800">
+                      Employees in "Per" sheet use their specified percentage
+                      for <strong>ACTUAL calculation</strong>
+                    </p>
+                  </div>
+
+                  <div className="bg-violet-50 border border-violet-200 rounded p-3">
+                    <p className="font-semibold text-purple-900 mb-1">
+                      🔴 October Exclusion Rule:
+                    </p>
+                    <p className="ml-4 text-green-800">
+                      Employees in "Average" sheet have{" "}
+                      <strong>October estimate = 0</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
@@ -1005,7 +1109,6 @@ export default function Step8Page() {
               optional={true}
             />
           </div>
-
           {[staffFile, bonusFile].filter(Boolean).length < 2 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1033,7 +1136,6 @@ export default function Step8Page() {
               </div>
             </div>
           )}
-
           {isProcessing && (
             <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1044,7 +1146,6 @@ export default function Step8Page() {
               </div>
             </div>
           )}
-
           {error && (
             <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1065,7 +1166,6 @@ export default function Step8Page() {
               </div>
             </div>
           )}
-
           {comparisonData.length > 0 && (
             <div className="mt-8">
               <div className="flex justify-between items-center mb-4">
@@ -1098,35 +1198,95 @@ export default function Step8Page() {
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-gray-100">
-                        <th className="border border-gray-300 px-4 py-2 text-left">
-                          Employee ID
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeId")}
+                        >
+                          <div className="flex items-center">
+                            Employee ID
+                            <SortIcon columnKey="employeeId" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-left">
-                          Employee Name
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeName")}
+                        >
+                          <div className="flex items-center">
+                            Employee Name
+                            <SortIcon columnKey="employeeName" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-left">
-                          Department
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("department")}
+                        >
+                          <div className="flex items-center">
+                            Department
+                            <SortIcon columnKey="department" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">
-                          Actual %
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("actualPercentage")}
+                        >
+                          <div className="flex items-center justify-center">
+                            Actual %
+                            <SortIcon columnKey="actualPercentage" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-right">
-                          Register (8.33%)
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("registerCalculated")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Register (8.33%)
+                            <SortIcon columnKey="registerCalculated" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-right">
-                          Actual
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("actualCalculated")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Actual
+                            <SortIcon columnKey="actualCalculated" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-right">
-                          Reim (Calculated)
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("reimCalculated")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Reim (Calculated)
+                            <SortIcon columnKey="reimCalculated" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-right">
-                          Reim (HR)
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("reimHR")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Reim (HR)
+                            <SortIcon columnKey="reimHR" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-right">
-                          Difference
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("difference")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Difference
+                            <SortIcon columnKey="difference" />
+                          </div>
                         </th>
-                        <th className="border border-gray-300 px-4 py-2 text-center">
-                          Status
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("status")}
+                        >
+                          <div className="flex items-center justify-center">
+                            Status
+                            <SortIcon columnKey="status" />
+                          </div>
                         </th>
                       </tr>
                     </thead>

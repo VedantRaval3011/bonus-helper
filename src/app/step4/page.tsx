@@ -12,6 +12,7 @@ export default function Step4Page() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isFormulaMinimized, setIsFormulaMinimized] = useState(true);
 
   type FileSlot = { type: string; file: File | null };
 
@@ -1083,63 +1084,99 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
           </div>
 
           {/* Formula Explanation */}
-          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Calculation Formula (Staff Only)
-            </h3>
-            <div className="text-sm text-blue-800 space-y-2">
-              <p>
-                <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
-                Q*0.6, ""))
-              </p>
-              <p>
-                <strong>Where:</strong>
-              </p>
-              <ul className="list-disc ml-6 space-y-1">
-                <li>X = Percentage (calculated from Date of Joining)</li>
-                <li>
-                  Q = GROSS SAL. (sum of monthly salaries + Oct 2025 estimate)
-                </li>
-              </ul>
-              <p>
-                <strong>Logic:</strong>
-              </p>
-              <ul className="list-disc ml-6 space-y-1">
-                <li>If percentage = 8.33% → Calculated Value = GROSS SAL.</li>
-                <li>
-                  If percentage &gt; 8.33% (10% or 12%) → Calculated Value =
-                  GROSS SAL. × 0.6
-                </li>
-              </ul>
-              <p>
-                <strong>October Filtering:</strong> If employee ID exists in the
-                "Average" sheet of Actual Percentage file, October estimate is
-                set to 0
-              </p>
-              <p>
-                <strong>GROSS 02 (HR):</strong> SUM of all "GROSS 02" values
-                from bonus file (for duplicate employee IDs)
-              </p>
-              <p className="text-xs text-blue-600 mt-2">
-                 Percentage is calculated based on
-                service period as of Oct 12, 2025: &lt;12 months = 10% | 12-23
-                months = 12% | ≥24 months = 8.33%
-              </p>
-            </div>
-          </div>
+<div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+  {/* Header with Minimize Button */}
+  <div 
+    className="flex items-center justify-between p-4 cursor-pointer hover:bg-blue-100 transition-colors"
+    onClick={() => setIsFormulaMinimized(!isFormulaMinimized)}
+  >
+    <h3 className="font-bold text-blue-900 flex items-center gap-2">
+      <svg
+        className="w-5 h-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+      Calculation Formula (Staff Only)
+    </h3>
+    <button
+      type="button"
+      className="p-1 rounded-lg hover:bg-blue-200 transition-colors"
+      aria-label={isFormulaMinimized ? "Expand" : "Minimize"}
+    >
+      <svg
+        className={`w-5 h-5 text-blue-900 transition-transform duration-200 ${
+          isFormulaMinimized ? "rotate-180" : ""
+        }`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M5 15l7-7 7 7"
+        />
+      </svg>
+    </button>
+  </div>
+
+  {/* Collapsible Content */}
+  <div
+    className={`overflow-hidden transition-all duration-300 ${
+      isFormulaMinimized ? "max-h-0" : "max-h-[600px]"
+    }`}
+  >
+    <div className="px-6 pb-6 text-sm text-blue-800 space-y-2">
+      <p>
+        <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
+        Q*0.6, ""))
+      </p>
+      <p>
+        <strong>Where:</strong>
+      </p>
+      <ul className="list-disc ml-6 space-y-1">
+        <li>X = Percentage (calculated from Date of Joining)</li>
+        <li>
+          Q = GROSS SAL. (sum of monthly salaries + Oct 2025 estimate)
+        </li>
+      </ul>
+      <p>
+        <strong>Logic:</strong>
+      </p>
+      <ul className="list-disc ml-6 space-y-1">
+        <li>If percentage = 8.33% → Calculated Value = GROSS SAL.</li>
+        <li>
+          If percentage &gt; 8.33% (10% or 12%) → Calculated Value =
+          GROSS SAL. × 0.6
+        </li>
+      </ul>
+      <p>
+        <strong>October Filtering:</strong> If employee ID exists in the
+        "Average" sheet of Actual Percentage file, October estimate is
+        set to 0
+      </p>
+      <p>
+        <strong>GROSS 02 (HR):</strong> SUM of all "GROSS 02" values
+        from bonus file (for duplicate employee IDs)
+      </p>
+      <p className="text-xs text-blue-600 mt-2">
+        ℹ️ Percentage is calculated based on
+        service period as of Oct 12, 2025: &lt;12 months = 10% | 12-23
+        months = 12% | ≥24 months = 8.33%
+      </p>
+    </div>
+  </div>
+</div>
+
 
           {/* File Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

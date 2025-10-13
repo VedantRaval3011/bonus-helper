@@ -1366,9 +1366,6 @@ export default function Step6Page() {
               <h1 className="text-3xl font-bold text-gray-800">
                 Step 6 - Unpaid Verification
               </h1>
-              <p className="text-sm text-gray-600 mt-2">
-                ✅ Now handles 0 vs blank cells correctly in averaging
-              </p>
             </div>
             <div className="flex gap-3">
               <button

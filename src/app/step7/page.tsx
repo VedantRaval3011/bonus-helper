@@ -12,7 +12,8 @@ export default function Step7Page() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  const [isFormulaMinimized, setIsFormulaMinimized] = useState(true);
+
   // 🎯 NEW: Sorting state
   const [sortConfig, setSortConfig] = useState<{
     key: string | null;
@@ -20,157 +21,189 @@ export default function Step7Page() {
   }>({ key: null, direction: null });
 
   // === Step 7 Audit Helpers ===
-const TOLERANCE_STEP7 = 12; // Step 7 uses ±12 to mark Match vs Mismatch
+  const TOLERANCE_STEP7 = 12; // Step 7 uses ±12 to mark Match vs Mismatch
 
-async function postAuditMessagesStep7(items: any[], batchId?: string) {
-  const bid =
-    batchId ||
-    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2));
-  await fetch('/api/audit/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchId: bid, step: 7, items }),
-  });
-  return bid;
-}
-
-function buildStep7MismatchMessages(rows: any[]) {
-  const items: any[] = [];
-  for (const r of rows) {
-    if (r?.status === 'Mismatch') {
-      items.push({
-        level: 'error',
-        tag: 'mismatch',
-        text: `[step7] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
-        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
-        source: 'step7',
-        meta: {
-          employeeId: r.employeeId,
-          name: r.employeeName,
-          department: r.department,
-          dateOfJoining: r.dateOfJoining,
-          percentage: r.percentage,
-          percentageSource: r.percentageSource,
-          octoberEstimate: r.octoberEstimate,
-          grossSal: r.grossSal,
-          gross2: r.gross2,
-          actualCalculated: r.actualCalculated,
-          actualHR: r.actualHR,
-          actualHRCount: r.actualHRCount,
-          diff: r.difference,
-          tolerance: TOLERANCE_STEP7,
-        },
-      });
-    }
+  async function postAuditMessagesStep7(items: any[], batchId?: string) {
+    const bid =
+      batchId ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: bid, step: 7, items }),
+    });
+    return bid;
   }
-  return items;
-}
 
-function buildStep7SummaryMessage(rows: any[]) {
-  const total = rows.length || 0;
-  const matches = rows.filter((r) => r.status === 'Match').length;
-  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
+  function buildStep7MismatchMessages(rows: any[]) {
+    const items: any[] = [];
+    for (const r of rows) {
+      if (r?.status === "Mismatch") {
+        items.push({
+          level: "error",
+          tag: "mismatch",
+          text: `[step7] ${r.employeeId} ${r.employeeName} diff=${Number(
+            r.difference ?? 0
+          ).toFixed(2)}`,
+          scope:
+            r.department === "Staff"
+              ? "staff"
+              : r.department === "Worker"
+              ? "worker"
+              : "global",
+          source: "step7",
+          meta: {
+            employeeId: r.employeeId,
+            name: r.employeeName,
+            department: r.department,
+            dateOfJoining: r.dateOfJoining,
+            percentage: r.percentage,
+            percentageSource: r.percentageSource,
+            octoberEstimate: r.octoberEstimate,
+            grossSal: r.grossSal,
+            gross2: r.gross2,
+            actualCalculated: r.actualCalculated,
+            actualHR: r.actualHR,
+            actualHRCount: r.actualHRCount,
+            diff: r.difference,
+            tolerance: TOLERANCE_STEP7,
+          },
+        });
+      }
+    }
+    return items;
+  }
 
-  const staffRows = rows.filter((r) => r.department === 'Staff');
-  const workerRows = rows.filter((r) => r.department === 'Worker');
+  function buildStep7SummaryMessage(rows: any[]) {
+    const total = rows.length || 0;
+    const matches = rows.filter((r) => r.status === "Match").length;
+    const mismatches = rows.filter((r) => r.status === "Mismatch").length;
 
-  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
-  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
+    const staffRows = rows.filter((r) => r.department === "Staff");
+    const workerRows = rows.filter((r) => r.department === "Worker");
 
-  const customPercentageCount = rows.filter((r) => r.percentageSource === 'Custom').length;
-  const zeroOctoberCount = rows.filter((r) => r.octoberEstimate === 0).length;
-  const duplicateHRCount = rows.filter((r) => r.actualHRCount > 1).length;
+    const staffMismatch = staffRows.filter(
+      (r) => r.status === "Mismatch"
+    ).length;
+    const workerMismatch = workerRows.filter(
+      (r) => r.status === "Mismatch"
+    ).length;
 
-  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
-  const staffGross2Sum = sum(staffRows.map((r) => Number(r.gross2 || 0)));
-  const staffActualCalcSum = sum(staffRows.map((r) => Number(r.actualCalculated || 0)));
-  const staffActualHRSum = sum(staffRows.map((r) => Number(r.actualHR || 0)));
+    const customPercentageCount = rows.filter(
+      (r) => r.percentageSource === "Custom"
+    ).length;
+    const zeroOctoberCount = rows.filter((r) => r.octoberEstimate === 0).length;
+    const duplicateHRCount = rows.filter((r) => r.actualHRCount > 1).length;
 
-  const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSal || 0)));
-  const workerGross2Sum = sum(workerRows.map((r) => Number(r.gross2 || 0)));
-  const workerActualCalcSum = sum(workerRows.map((r) => Number(r.actualCalculated || 0)));
-  const workerActualHRSum = sum(workerRows.map((r) => Number(r.actualHR || 0)));
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
+    const staffGross2Sum = sum(staffRows.map((r) => Number(r.gross2 || 0)));
+    const staffActualCalcSum = sum(
+      staffRows.map((r) => Number(r.actualCalculated || 0))
+    );
+    const staffActualHRSum = sum(staffRows.map((r) => Number(r.actualHR || 0)));
 
-  return {
-    level: 'info',
-    tag: 'summary',
-    text: `Step7 run: total=${total} match=${matches} mismatch=${mismatches}`,
-    scope: 'global',
-    source: 'step7',
-    meta: {
-      totals: {
-        total,
-        matches,
-        mismatches,
-        tolerance: TOLERANCE_STEP7,
-        customPercentageCount,
-        zeroOctoberCount,
-        duplicateHRCount,
+    const workerGrossSalSum = sum(
+      workerRows.map((r) => Number(r.grossSal || 0))
+    );
+    const workerGross2Sum = sum(workerRows.map((r) => Number(r.gross2 || 0)));
+    const workerActualCalcSum = sum(
+      workerRows.map((r) => Number(r.actualCalculated || 0))
+    );
+    const workerActualHRSum = sum(
+      workerRows.map((r) => Number(r.actualHR || 0))
+    );
+
+    return {
+      level: "info",
+      tag: "summary",
+      text: `Step7 run: total=${total} match=${matches} mismatch=${mismatches}`,
+      scope: "global",
+      source: "step7",
+      meta: {
+        totals: {
+          total,
+          matches,
+          mismatches,
+          tolerance: TOLERANCE_STEP7,
+          customPercentageCount,
+          zeroOctoberCount,
+          duplicateHRCount,
+        },
+        staff: {
+          count: staffRows.length,
+          mismatches: staffMismatch,
+          grossSalSum: staffGrossSalSum,
+          gross2Sum: staffGross2Sum,
+          actualCalcSum: staffActualCalcSum,
+          actualHRSum: staffActualHRSum,
+        },
+        worker: {
+          count: workerRows.length,
+          mismatches: workerMismatch,
+          grossSalSum: workerGrossSalSum,
+          gross2Sum: workerGross2Sum,
+          actualCalcSum: workerActualCalcSum,
+          actualHRSum: workerActualHRSum,
+        },
       },
-      staff: {
-        count: staffRows.length,
-        mismatches: staffMismatch,
-        grossSalSum: staffGrossSalSum,
-        gross2Sum: staffGross2Sum,
-        actualCalcSum: staffActualCalcSum,
-        actualHRSum: staffActualHRSum,
-      },
-      worker: {
-        count: workerRows.length,
-        mismatches: workerMismatch,
-        grossSalSum: workerGrossSalSum,
-        gross2Sum: workerGross2Sum,
-        actualCalcSum: workerActualCalcSum,
-        actualHRSum: workerActualHRSum,
-      },
-    },
-  };
-}
+    };
+  }
 
-async function handleSaveAuditStep7(rows: any[]) {
-  if (!rows || rows.length === 0) return;
-  const items = [buildStep7SummaryMessage(rows), ...buildStep7MismatchMessages(rows)];
-  if (items.length === 0) return;
-  await postAuditMessagesStep7(items);
-}
+  async function handleSaveAuditStep7(rows: any[]) {
+    if (!rows || rows.length === 0) return;
+    const items = [
+      buildStep7SummaryMessage(rows),
+      ...buildStep7MismatchMessages(rows),
+    ];
+    if (items.length === 0) return;
+    await postAuditMessagesStep7(items);
+  }
 
-function djb2Hash(str: string) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
-  return (h >>> 0).toString(36);
-}
+  function djb2Hash(str: string) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  }
 
-function buildRunKeyStep7(rows: any[]) {
-  const sig = rows
-    .map(r =>
-      `${r.employeeId}|${r.department}|${Number(r.grossSal)||0}|${Number(r.actualCalculated)||0}|${Number(r.actualHR)||0}|${Number(r.difference)||0}|${r.status}|${r.percentageSource}`
-    )
-    .join(';');
-  return djb2Hash(sig);
-}
+  function buildRunKeyStep7(rows: any[]) {
+    const sig = rows
+      .map(
+        (r) =>
+          `${r.employeeId}|${r.department}|${Number(r.grossSal) || 0}|${
+            Number(r.actualCalculated) || 0
+          }|${Number(r.actualHR) || 0}|${Number(r.difference) || 0}|${
+            r.status
+          }|${r.percentageSource}`
+      )
+      .join(";");
+    return djb2Hash(sig);
+  }
 
-useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
 
-  const runKey = buildRunKeyStep7(comparisonData);
-  const markerKey = `audit_step7_${runKey}`;
+    const runKey = buildRunKeyStep7(comparisonData);
+    const markerKey = `audit_step7_${runKey}`;
 
-  if (sessionStorage.getItem(markerKey)) return;
+    if (sessionStorage.getItem(markerKey)) return;
 
-  sessionStorage.setItem(markerKey, '1');
-  const deterministicBatchId = `step7-${runKey}`;
+    sessionStorage.setItem(markerKey, "1");
+    const deterministicBatchId = `step7-${runKey}`;
 
-  const items = [buildStep7SummaryMessage(comparisonData), ...buildStep7MismatchMessages(comparisonData)];
+    const items = [
+      buildStep7SummaryMessage(comparisonData),
+      ...buildStep7MismatchMessages(comparisonData),
+    ];
 
-  postAuditMessagesStep7(items, deterministicBatchId).catch(err => {
-    console.error('Auto-audit step7 failed', err);
-    sessionStorage.removeItem(markerKey);
-  });
-}, [comparisonData]);
+    postAuditMessagesStep7(items, deterministicBatchId).catch((err) => {
+      console.error("Auto-audit step7 failed", err);
+      sessionStorage.removeItem(markerKey);
+    });
+  }, [comparisonData]);
 
   type FileSlot = { type: string; file: File | null };
 
@@ -193,11 +226,7 @@ useEffect(() => {
 
   const actualPercentageFile =
     pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??
-    pickFile(
-      (s) =>
-        !!s.file &&
-        /actual.*percentage.*bonus/i.test(s.file.name)
-    );
+    pickFile((s) => !!s.file && /actual.*percentage.*bonus/i.test(s.file.name));
 
   const norm = (x: any) =>
     String(x ?? "")
@@ -206,52 +235,77 @@ useEffect(() => {
       .toUpperCase();
 
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1, JANUARY: 1,
-    FEB: 2, FEBRUARY: 2,
-    MAR: 3, MARCH: 3,
-    APR: 4, APRIL: 4,
+    JAN: 1,
+    JANUARY: 1,
+    FEB: 2,
+    FEBRUARY: 2,
+    MAR: 3,
+    MARCH: 3,
+    APR: 4,
+    APRIL: 4,
     MAY: 5,
-    JUN: 6, JUNE: 6,
-    JUL: 7, JULY: 7,
-    AUG: 8, AUGUST: 8,
-    SEP: 9, SEPT: 9, SEPTEMBER: 9,
-    OCT: 10, OCTOBER: 10,
-    NOV: 11, NOVEMBER: 11,
-    DEC: 12, DECEMBER: 12,
+    JUN: 6,
+    JUNE: 6,
+    JUL: 7,
+    JULY: 7,
+    AUG: 8,
+    AUGUST: 8,
+    SEP: 9,
+    SEPT: 9,
+    SEPTEMBER: 9,
+    OCT: 10,
+    OCTOBER: 10,
+    NOV: 11,
+    NOVEMBER: 11,
+    DEC: 12,
+    DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
   const parseMonthFromSheetName = (sheetName: string): string | null => {
-    const s = String(sheetName || "").trim().toUpperCase();
-    
+    const s = String(sheetName || "")
+      .trim()
+      .toUpperCase();
+
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
       const m = Number(yyyymm[2]);
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
-    
-    const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
+
+    const mon = s.match(
+      /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/
+    );
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
     );
     const y2or4 = s.match(/\b(20\d{2}|\d{2})\b/);
     const monthToken = (monthFull?.[1] || mon?.[1]) as string | undefined;
-    
+
     if (monthToken && y2or4) {
       let y = Number(y2or4[1]);
       if (y < 100) y += 2000;
       const m = MONTH_NAME_MAP[monthToken];
       if (m) return `${y}-${pad2(m)}`;
     }
-    
+
     return null;
   };
 
   const AVG_WINDOW: string[] = [
-    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
-    "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
+    "2024-11",
+    "2024-12",
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
   ];
 
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
@@ -272,31 +326,29 @@ useEffect(() => {
     if (!dateValue) return 0;
 
     let doj: Date;
-    
+
     if (typeof dateValue === "number") {
       const excelEpoch = new Date(1899, 11, 30);
       doj = new Date(excelEpoch.getTime() + dateValue * 86400000);
-    } 
-    else if (typeof dateValue === "string") {
+    } else if (typeof dateValue === "string") {
       const trimmed = dateValue.trim();
-      
+
       const ddmmyyMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
-      
+
       if (ddmmyyMatch) {
         let day = parseInt(ddmmyyMatch[1], 10);
         let month = parseInt(ddmmyyMatch[2], 10);
         let year = parseInt(ddmmyyMatch[3], 10);
-        
+
         if (year < 100) {
           year += year < 50 ? 2000 : 1900;
         }
-        
+
         doj = new Date(year, month - 1, day);
       } else {
         doj = new Date(dateValue);
       }
-    } 
-    else {
+    } else {
       doj = new Date(dateValue);
     }
 
@@ -311,7 +363,7 @@ useEffect(() => {
     const daysDiff = referenceDate.getDate() - doj.getDate();
 
     let totalMonths = yearsDiff * 12 + monthsDiff;
-    
+
     if (daysDiff < 0) {
       totalMonths--;
     }
@@ -335,7 +387,7 @@ useEffect(() => {
     percentage: number
   ): number => {
     const pct = Number(percentage);
-    
+
     if (pct === 8.33) {
       return (grossSal * pct) / 100;
     } else if (pct > 8.33) {
@@ -382,9 +434,16 @@ useEffect(() => {
             const empCode = Number(row[1]);
             const bonusPercentage = Number(row[4]);
 
-            if (empCode && !isNaN(empCode) && bonusPercentage && !isNaN(bonusPercentage)) {
+            if (
+              empCode &&
+              !isNaN(empCode) &&
+              bonusPercentage &&
+              !isNaN(bonusPercentage)
+            ) {
               customPercentageMap.set(empCode, bonusPercentage);
-              console.log(`   Emp ${empCode}: Custom percentage = ${bonusPercentage}%`);
+              console.log(
+                `   Emp ${empCode}: Custom percentage = ${bonusPercentage}%`
+              );
             }
           }
         }
@@ -409,10 +468,16 @@ useEffect(() => {
           }
         }
 
-        console.log(`\n📊 Loaded ${customPercentageMap.size} custom percentages`);
-        console.log(`📊 Loaded ${zeroOctoberEmployees.size} zero-October employees`);
+        console.log(
+          `\n📊 Loaded ${customPercentageMap.size} custom percentages`
+        );
+        console.log(
+          `📊 Loaded ${zeroOctoberEmployees.size} zero-October employees`
+        );
       } else {
-        console.log("\n⚠️ Actual Percentage file not found - using calculated percentages");
+        console.log(
+          "\n⚠️ Actual Percentage file not found - using calculated percentages"
+        );
       }
 
       // ========== STEP 1: LOAD BONUS FILE - STAFF SHEET ==========
@@ -441,13 +506,13 @@ useEffect(() => {
           const row = staffData[rowIdx];
           if (!row || row.length === 0) continue;
 
-          const hasEmpCode = row.some((cell: any) => 
+          const hasEmpCode = row.some((cell: any) =>
             /EMP.*CODE|EMPCODE/i.test(String(cell ?? ""))
           );
 
           if (hasEmpCode) {
             const headers = row;
-            
+
             const empCodeIdx = headers.findIndex((h: any) =>
               /EMP.*CODE|EMPCODE/i.test(String(h ?? ""))
             );
@@ -467,9 +532,11 @@ useEffect(() => {
               const dataRow = staffData[i];
               if (!dataRow || dataRow.length === 0) continue;
 
-              if (dataRow.some((cell: any) => 
-                /EMP.*CODE|EMPCODE|^SR.*NO/i.test(String(cell ?? ""))
-              )) {
+              if (
+                dataRow.some((cell: any) =>
+                  /EMP.*CODE|EMPCODE|^SR.*NO/i.test(String(cell ?? ""))
+                )
+              ) {
                 break;
               }
 
@@ -513,7 +580,7 @@ useEffect(() => {
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           continue;
         }
@@ -586,7 +653,9 @@ useEffect(() => {
         }
       }
 
-      console.log(`\n✅ Staff data extracted: ${staffEmployees.size} employees`);
+      console.log(
+        `\n✅ Staff data extracted: ${staffEmployees.size} employees`
+      );
 
       // ========== STEP 3: CALCULATE GROSS SAL WITH CONDITIONAL OCTOBER ==========
       const softwareEmployeesData: Map<
@@ -636,36 +705,45 @@ useEffect(() => {
         });
       }
 
-      console.log(`\n✅ GROSS SAL calculated: ${softwareEmployeesData.size} employees`);
+      console.log(
+        `\n✅ GROSS SAL calculated: ${softwareEmployeesData.size} employees`
+      );
 
       // ========== STEP 4: CALCULATE ACTUAL WITH CUSTOM PERCENTAGES ==========
       const comparison: any[] = [];
 
       for (const [empId, softwareData] of softwareEmployeesData) {
         const hrData = hrActualDataMap.get(empId);
-        
-        const monthsFromDOJ = calculateMonthsFromDOJ(softwareData.dateOfJoining);
-        
+
+        const monthsFromDOJ = calculateMonthsFromDOJ(
+          softwareData.dateOfJoining
+        );
+
         let percentageCalculated: number;
         let percentageSource: string;
-        
+
         if (customPercentageMap.has(empId)) {
           percentageCalculated = customPercentageMap.get(empId)!;
           percentageSource = "Custom";
-          console.log(`🎯 Emp ${empId}: Using custom percentage = ${percentageCalculated}%`);
+          console.log(
+            `🎯 Emp ${empId}: Using custom percentage = ${percentageCalculated}%`
+          );
         } else {
           percentageCalculated = calculatePercentageByMonths(monthsFromDOJ);
           percentageSource = "Calculated";
         }
 
-        const gross2 = calculateGross2(softwareData.grossSal, percentageCalculated);
+        const gross2 = calculateGross2(
+          softwareData.grossSal,
+          percentageCalculated
+        );
         const actualCalculated = calculateActual(
           softwareData.grossSal,
           gross2,
           percentageCalculated
         );
 
-        const actualHR = hrData 
+        const actualHR = hrData
           ? hrData.actualHRValues.reduce((sum, val) => sum + val, 0)
           : 0;
 
@@ -735,7 +813,7 @@ useEffect(() => {
   // 🎯 NEW: Handle column sorting
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
-    
+
     if (sortConfig.key === key) {
       if (sortConfig.direction === "asc") {
         direction = "desc";
@@ -744,14 +822,14 @@ useEffect(() => {
         return;
       }
     }
-    
+
     setSortConfig({ key, direction });
   };
 
   // 🎯 NEW: Sort icon component
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     const isActive = sortConfig.key === columnKey;
-    
+
     return (
       <div className="inline-flex flex-col ml-1">
         <svg
@@ -790,34 +868,32 @@ useEffect(() => {
 
   const formatDate = (dateValue: any) => {
     if (!dateValue) return "N/A";
-    
+
     try {
       let date: Date;
-      
+
       if (typeof dateValue === "number") {
         const excelEpoch = new Date(1899, 11, 30);
         date = new Date(excelEpoch.getTime() + dateValue * 86400000);
-      } 
-      else if (typeof dateValue === "string") {
+      } else if (typeof dateValue === "string") {
         const trimmed = dateValue.trim();
-        
+
         const ddmmyyMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
-        
+
         if (ddmmyyMatch) {
           let day = parseInt(ddmmyyMatch[1], 10);
           let month = parseInt(ddmmyyMatch[2], 10);
           let year = parseInt(ddmmyyMatch[3], 10);
-          
+
           if (year < 100) {
             year += year < 50 ? 2000 : 1900;
           }
-          
+
           date = new Date(year, month - 1, day);
         } else {
           date = new Date(dateValue);
         }
-      } 
-      else {
+      } else {
         date = new Date(dateValue);
       }
 
@@ -838,7 +914,7 @@ useEffect(() => {
       comparisonData.map((row) => ({
         "Emp ID": row.employeeId,
         "Employee Name": row.employeeName,
-        "Dept": row.department,
+        Dept: row.department,
         "Date of Joining": formatDate(row.dateOfJoining),
         "% Source": row.percentageSource,
         "%": row.percentage,
@@ -848,8 +924,8 @@ useEffect(() => {
         "Actual (Calculated)": row.actualCalculated,
         "Actual (HR)": row.actualHR,
         "HR Entry Count": row.actualHRCount,
-        "Difference": row.difference,
-        "Status": row.status,
+        Difference: row.difference,
+        Status: row.status,
       }))
     );
 
@@ -871,7 +947,11 @@ useEffect(() => {
   }) => (
     <div
       className={`border-2 rounded-lg p-6 ${
-        file ? "border-green-300 bg-green-50" : optional ? "border-gray-300 bg-gray-50" : "border-red-300 bg-red-50"
+        file
+          ? "border-green-300 bg-green-50"
+          : optional
+          ? "border-gray-300 bg-gray-50"
+          : "border-red-300 bg-red-50"
       }`}
     >
       {file ? (
@@ -905,7 +985,11 @@ useEffect(() => {
         </div>
       ) : (
         <div className="bg-white rounded-lg p-4 border border-gray-200">
-          <div className={`flex items-center gap-2 ${optional ? "text-gray-500" : "text-red-600"} mb-2`}>
+          <div
+            className={`flex items-center gap-2 ${
+              optional ? "text-gray-500" : "text-red-600"
+            } mb-2`}
+          >
             <svg
               className="w-5 h-5"
               fill="none"
@@ -919,9 +1003,13 @@ useEffect(() => {
                 d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
               />
             </svg>
-            <span className="font-medium">{optional ? "Optional - Not uploaded" : "File not found"}</span>
+            <span className="font-medium">
+              {optional ? "Optional - Not uploaded" : "File not found"}
+            </span>
           </div>
-          <p className="text-xs text-gray-500">{optional ? "Will use calculated values" : "Upload in Step 1"}</p>
+          <p className="text-xs text-gray-500">
+            {optional ? "Will use calculated values" : "Upload in Step 1"}
+          </p>
         </div>
       )}
     </div>
@@ -963,47 +1051,101 @@ useEffect(() => {
           </div>
 
           {/* Formula Explanation */}
-          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+            {/* Header with Minimize Button */}
+            <div
+              className="flex items-center justify-between p-4 cursor-pointer hover:bg-blue-100 transition-colors"
+              onClick={() => setIsFormulaMinimized(!isFormulaMinimized)}
+            >
+              <h3 className="font-bold text-blue-900 flex items-center gap-2">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                Complete Calculation Logic
+              </h3>
+              <button
+                type="button"
+                className="p-1 rounded-lg hover:bg-blue-200 transition-colors"
+                aria-label={isFormulaMinimized ? "Expand" : "Minimize"}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Complete Calculation Logic
-            </h3>
-            <div className="text-sm text-blue-800 space-y-3">
-              <div>
-                <p className="font-semibold mb-1">1. GROSS SAL. (Software):</p>
-                <p className="ml-4">Sum of all monthly SALARY1 values + October 2025 estimate</p>
-              </div>
-              
-              <div>
-                <p className="font-semibold mb-1">2. GROSS 02:</p>
-                <p className="ml-4"><strong>Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33, Q*0.6, ""))</p>
-              </div>
+                <svg
+                  className={`w-5 h-5 text-blue-900 transition-transform duration-200 ${
+                    isFormulaMinimized ? "rotate-180" : ""
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 15l7-7 7 7"
+                  />
+                </svg>
+              </button>
+            </div>
 
-              <div>
-                <p className="font-semibold mb-1">3. Actual (Software):</p>
-                <p className="ml-4"><strong>Formula:</strong> =IF(E=8.33, R*E/100, IF(E&gt;8.33, S*E/100, ""))</p>
-              </div>
+            {/* Collapsible Content */}
+            <div
+              className={`overflow-hidden transition-all duration-300 ${
+                isFormulaMinimized ? "max-h-0" : "max-h-[500px]"
+              }`}
+            >
+              <div className="p-6 pt-0 text-sm text-blue-800 space-y-3">
+                <div>
+                  <p className="font-semibold mb-1">
+                    1. GROSS SAL. (Software):
+                  </p>
+                  <p className="ml-4">
+                    Sum of all monthly SALARY1 values + October 2025 estimate
+                  </p>
+                </div>
 
-              <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-3">
-                <p className="font-semibold text-purple-900 mb-1">🎯 Custom Percentage Override:</p>
-                <p className="ml-4 text-purple-800">Employees in "Per" sheet use their specified percentage instead of calculated</p>
-              </div>
+                <div>
+                  <p className="font-semibold mb-1">2. GROSS 02:</p>
+                  <p className="ml-4">
+                    <strong>Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
+                    Q*0.6, ""))
+                  </p>
+                </div>
 
-              <div className="bg-violet-50 border border-violet-200 rounded p-3">
-                <p className="font-semibold text-violet-900 mb-1">🔴 Zero October Rule:</p>
-                <p className="ml-4 text-violet-800">Employees in "Average" sheet have October estimate set to 0</p>
+                <div>
+                  <p className="font-semibold mb-1">3. Actual (Software):</p>
+                  <p className="ml-4">
+                    <strong>Formula:</strong> =IF(E=8.33, R*E/100, IF(E&gt;8.33,
+                    S*E/100, ""))
+                  </p>
+                </div>
+
+                <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-3">
+                  <p className="font-semibold text-purple-900 mb-1">
+                    🎯 Custom Percentage Override:
+                  </p>
+                  <p className="ml-4 text-purple-800">
+                    Employees in "Per" sheet use their specified percentage
+                    instead of calculated
+                  </p>
+                </div>
+
+                <div className="bg-violet-50 border border-violet-200 rounded p-3">
+                  <p className="font-semibold text-violet-900 mb-1">
+                    🔴 Zero October Rule:
+                  </p>
+                  <p className="ml-4 text-violet-800">
+                    Employees in "Average" sheet have October estimate set to 0
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1117,189 +1259,189 @@ useEffect(() => {
               <div className="overflow-x-auto">
                 <div className="max-h-[600px] overflow-y-auto">
                   <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("employeeId")}
-                      >
-                        <div className="flex items-center">
-                          Emp ID
-                          <SortIcon columnKey="employeeId" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("employeeName")}
-                      >
-                        <div className="flex items-center">
-                          Employee Name
-                          <SortIcon columnKey="employeeName" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("department")}
-                      >
-                        <div className="flex items-center">
-                          Dept
-                          <SortIcon columnKey="department" />
-                        </div>
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Date of Joining
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("percentage")}
-                      >
-                        <div className="flex items-center justify-center">
-                          %
-                          <SortIcon columnKey="percentage" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("grossSal")}
-                      >
-                        <div className="flex items-center justify-end">
-                          GROSS (R)
-                          <SortIcon columnKey="grossSal" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("gross2")}
-                      >
-                        <div className="flex items-center justify-end">
-                          GROSS 2 (S)
-                          <SortIcon columnKey="gross2" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("actualCalculated")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Actual (Calculated)
-                          <SortIcon columnKey="actualCalculated" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("actualHR")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Actual (HR)
-                          <SortIcon columnKey="actualHR" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("difference")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Difference
-                          <SortIcon columnKey="difference" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("status")}
-                      >
-                        <div className="flex items-center justify-center">
-                          Status
-                          <SortIcon columnKey="status" />
-                        </div>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((row, idx) => (
-                      <tr
-                        key={idx}
-                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                      >
-                        <td className="border border-gray-300 px-4 py-2">
-                          {row.employeeId}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2">
-                          {row.employeeName}
-                          {row.actualHRCount > 1 && (
-                            <span className="ml-2 text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded">
-                              {row.actualHRCount}x entries
-                            </span>
-                          )}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2">
-                          <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
-                            {row.department}
-                          </span>
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-sm">
-                          {formatDate(row.dateOfJoining)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.percentage === 10.0
-                                  ? "bg-red-100 text-red-800"
-                                  : row.percentage === 12.0
-                                  ? "bg-yellow-100 text-yellow-800"
-                                  : "bg-green-100 text-green-800"
-                              }`}
-                            >
-                              {row.percentage}%
-                            </span>
-                            {row.percentageSource === "Custom" && (
-                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                                Custom
-                              </span>
-                            )}
-                            {row.octoberEstimate === 0 && (
-                              <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">
-                                Oct=0
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right text-blue-600 font-medium">
-                          {formatCurrency(row.grossSal)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right text-purple-600 font-medium">
-                          {formatCurrency(row.gross2)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right font-bold text-green-600">
-                          {formatCurrency(row.actualCalculated)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right font-bold text-violet-600">
-                          {formatCurrency(row.actualHR)}
-                        </td>
-                        <td
-                          className={`border border-gray-300 px-4 py-2 text-right font-medium ${
-                            Math.abs(row.difference) <= TOLERANCE
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeId")}
                         >
-                          {formatCurrency(row.difference)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-sm font-medium ${
-                              row.status === "Match"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-red-100 text-red-800"
+                          <div className="flex items-center">
+                            Emp ID
+                            <SortIcon columnKey="employeeId" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeName")}
+                        >
+                          <div className="flex items-center">
+                            Employee Name
+                            <SortIcon columnKey="employeeName" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("department")}
+                        >
+                          <div className="flex items-center">
+                            Dept
+                            <SortIcon columnKey="department" />
+                          </div>
+                        </th>
+                        <th className="border border-gray-300 px-4 py-2 text-left">
+                          Date of Joining
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("percentage")}
+                        >
+                          <div className="flex items-center justify-center">
+                            %
+                            <SortIcon columnKey="percentage" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("grossSal")}
+                        >
+                          <div className="flex items-center justify-end">
+                            GROSS (R)
+                            <SortIcon columnKey="grossSal" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("gross2")}
+                        >
+                          <div className="flex items-center justify-end">
+                            GROSS 2 (S)
+                            <SortIcon columnKey="gross2" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("actualCalculated")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Actual (Calculated)
+                            <SortIcon columnKey="actualCalculated" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("actualHR")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Actual (HR)
+                            <SortIcon columnKey="actualHR" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("difference")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Difference
+                            <SortIcon columnKey="difference" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("status")}
+                        >
+                          <div className="flex items-center justify-center">
+                            Status
+                            <SortIcon columnKey="status" />
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredData.map((row, idx) => (
+                        <tr
+                          key={idx}
+                          className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                        >
+                          <td className="border border-gray-300 px-4 py-2">
+                            {row.employeeId}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2">
+                            {row.employeeName}
+                            {row.actualHRCount > 1 && (
+                              <span className="ml-2 text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded">
+                                {row.actualHRCount}x entries
+                              </span>
+                            )}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2">
+                            <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
+                              {row.department}
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-sm">
+                            {formatDate(row.dateOfJoining)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.percentage === 10.0
+                                    ? "bg-red-100 text-red-800"
+                                    : row.percentage === 12.0
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-green-100 text-green-800"
+                                }`}
+                              >
+                                {row.percentage}%
+                              </span>
+                              {row.percentageSource === "Custom" && (
+                                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                  Custom
+                                </span>
+                              )}
+                              {row.octoberEstimate === 0 && (
+                                <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">
+                                  Oct=0
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-right text-blue-600 font-medium">
+                            {formatCurrency(row.grossSal)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-right text-purple-600 font-medium">
+                            {formatCurrency(row.gross2)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-right font-bold text-green-600">
+                            {formatCurrency(row.actualCalculated)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-right font-bold text-violet-600">
+                            {formatCurrency(row.actualHR)}
+                          </td>
+                          <td
+                            className={`border border-gray-300 px-4 py-2 text-right font-medium ${
+                              Math.abs(row.difference) <= TOLERANCE
+                                ? "text-green-600"
+                                : "text-red-600"
                             }`}
                           >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {formatCurrency(row.difference)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-2 text-center">
+                            <span
+                              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                row.status === "Match"
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
