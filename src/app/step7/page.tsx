@@ -12,6 +12,12 @@ export default function Step7Page() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // 🎯 NEW: Sorting state
+  const [sortConfig, setSortConfig] = useState<{
+    key: string | null;
+    direction: "asc" | "desc" | null;
+  }>({ key: null, direction: null });
 
   // === Step 7 Audit Helpers ===
 const TOLERANCE_STEP7 = 12; // Step 7 uses ±12 to mark Match vs Mismatch
@@ -31,7 +37,6 @@ async function postAuditMessagesStep7(items: any[], batchId?: string) {
 }
 
 function buildStep7MismatchMessages(rows: any[]) {
-  // Expecting rows with: { employeeId, employeeName, department, dateOfJoining, percentage, percentageSource, grossSal, octoberEstimate, gross2, actualCalculated, actualHR, actualHRCount, difference, status }
   const items: any[] = [];
   for (const r of rows) {
     if (r?.status === 'Mismatch') {
@@ -132,7 +137,6 @@ async function handleSaveAuditStep7(rows: any[]) {
   await postAuditMessagesStep7(items);
 }
 
-// Stable hash for run signature
 function djb2Hash(str: string) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
@@ -149,13 +153,13 @@ function buildRunKeyStep7(rows: any[]) {
 }
 
 useEffect(() => {
-  if (typeof window === 'undefined') return; // SSR guard
+  if (typeof window === 'undefined') return;
   if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
 
   const runKey = buildRunKeyStep7(comparisonData);
   const markerKey = `audit_step7_${runKey}`;
 
-  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+  if (sessionStorage.getItem(markerKey)) return;
 
   sessionStorage.setItem(markerKey, '1');
   const deterministicBatchId = `step7-${runKey}`;
@@ -164,21 +168,9 @@ useEffect(() => {
 
   postAuditMessagesStep7(items, deterministicBatchId).catch(err => {
     console.error('Auto-audit step7 failed', err);
-    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+    sessionStorage.removeItem(markerKey);
   });
 }, [comparisonData]);
-
-useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const batchId = `step7-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const items = [buildStep7SummaryMessage(comparisonData), ...buildStep7MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep7(items, batchId).catch(err => console.error('Auto-audit step7 failed', err));
-}, [comparisonData]);
-
-
 
   type FileSlot = { type: string; file: File | null };
 
@@ -300,8 +292,6 @@ useEffect(() => {
         }
         
         doj = new Date(year, month - 1, day);
-        
-        console.log(`📅 Parsed date: ${trimmed} → ${day}/${month}/${year} → ${doj.toLocaleDateString('en-IN')}`);
       } else {
         doj = new Date(dateValue);
       }
@@ -311,7 +301,6 @@ useEffect(() => {
     }
 
     if (isNaN(doj.getTime())) {
-      console.warn(`⚠️ Invalid date: ${dateValue}`);
       return 0;
     }
 
@@ -379,7 +368,6 @@ useEffect(() => {
         const percentageBuffer = await actualPercentageFile.arrayBuffer();
         const percentageWorkbook = XLSX.read(percentageBuffer);
 
-        // Load "Per" sheet - custom percentages
         const perSheet = percentageWorkbook.Sheets["Per"];
         if (perSheet) {
           const perData: any[][] = XLSX.utils.sheet_to_json(perSheet, {
@@ -391,8 +379,8 @@ useEffect(() => {
             const row = perData[i];
             if (!row || row.length === 0) continue;
 
-            const empCode = Number(row[1]); // Column B
-            const bonusPercentage = Number(row[4]); // Column E
+            const empCode = Number(row[1]);
+            const bonusPercentage = Number(row[4]);
 
             if (empCode && !isNaN(empCode) && bonusPercentage && !isNaN(bonusPercentage)) {
               customPercentageMap.set(empCode, bonusPercentage);
@@ -401,7 +389,6 @@ useEffect(() => {
           }
         }
 
-        // Load "Average" sheet - zero October employees
         const avgSheet = percentageWorkbook.Sheets["Average"];
         if (avgSheet) {
           const avgData: any[][] = XLSX.utils.sheet_to_json(avgSheet, {
@@ -413,7 +400,7 @@ useEffect(() => {
             const row = avgData[i];
             if (!row || row.length === 0) continue;
 
-            const empCode = Number(row[1]); // Column B
+            const empCode = Number(row[1]);
 
             if (empCode && !isNaN(empCode)) {
               zeroOctoberEmployees.add(empCode);
@@ -619,12 +606,10 @@ useEffect(() => {
           baseSum += Number(v) || 0;
         }
 
-        // ✅ Check if employee should have zero October estimate
         let estOct = 0;
         const hasSep2025 = rec.months.has("2025-09");
 
         if (hasSep2025 && !zeroOctoberEmployees.has(empId)) {
-          // Normal calculation - include October estimate
           const values: number[] = [];
           for (const mk of AVG_WINDOW) {
             const v = rec.months.get(mk);
@@ -636,7 +621,6 @@ useEffect(() => {
             ? values.reduce((a, b) => a + b, 0) / values.length
             : 0;
         } else if (zeroOctoberEmployees.has(empId)) {
-          // Force October to zero
           estOct = 0;
           console.log(`🔴 Emp ${empId}: October estimate forced to 0`);
         }
@@ -662,7 +646,6 @@ useEffect(() => {
         
         const monthsFromDOJ = calculateMonthsFromDOJ(softwareData.dateOfJoining);
         
-        // ✅ Use custom percentage if available, otherwise calculate
         let percentageCalculated: number;
         let percentageSource: string;
         
@@ -726,6 +709,77 @@ useEffect(() => {
     }
   }, [staffFile, bonusFile, actualPercentageFile]);
 
+  // 🎯 NEW: Sorting logic
+  useEffect(() => {
+    let sorted = [...comparisonData];
+
+    if (sortConfig.key && sortConfig.direction) {
+      sorted.sort((a, b) => {
+        const aValue = a[sortConfig.key!];
+        const bValue = b[sortConfig.key!];
+
+        let comparison = 0;
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === "string" && typeof bValue === "string") {
+          comparison = aValue.localeCompare(bValue);
+        }
+
+        return sortConfig.direction === "asc" ? comparison : -comparison;
+      });
+    }
+
+    setFilteredData(sorted);
+  }, [comparisonData, sortConfig]);
+
+  // 🎯 NEW: Handle column sorting
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" = "asc";
+    
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === "asc") {
+        direction = "desc";
+      } else if (sortConfig.direction === "desc") {
+        setSortConfig({ key: null, direction: null });
+        return;
+      }
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  // 🎯 NEW: Sort icon component
+  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+    const isActive = sortConfig.key === columnKey;
+    
+    return (
+      <div className="inline-flex flex-col ml-1">
+        <svg
+          className={`w-3 h-3 ${
+            isActive && sortConfig.direction === "asc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M5 10l5-5 5 5H5z" />
+        </svg>
+        <svg
+          className={`w-3 h-3 -mt-1 ${
+            isActive && sortConfig.direction === "desc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M15 10l-5 5-5-5h10z" />
+        </svg>
+      </div>
+    );
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -782,9 +836,9 @@ useEffect(() => {
   const exportToExcel = () => {
     const ws = XLSX.utils.json_to_sheet(
       comparisonData.map((row) => ({
-        "Employee ID": row.employeeId,
+        "Emp ID": row.employeeId,
         "Employee Name": row.employeeName,
-        "Department": row.department,
+        "Dept": row.department,
         "Date of Joining": formatDate(row.dateOfJoining),
         "% Source": row.percentageSource,
         "%": row.percentage,
@@ -951,11 +1005,6 @@ useEffect(() => {
                 <p className="font-semibold text-violet-900 mb-1">🔴 Zero October Rule:</p>
                 <p className="ml-4 text-violet-800">Employees in "Average" sheet have October estimate set to 0</p>
               </div>
-
-              <div className="bg-yellow-50 border border-yellow-200 rounded p-3">
-                <p className="font-semibold text-yellow-900 mb-1">📅 Date Format:</p>
-                <p className="ml-4 text-yellow-800">Supports DD.MM.YY and DD.MM.YYYY formats</p>
-              </div>
             </div>
           </div>
 
@@ -1066,41 +1115,102 @@ useEffect(() => {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
+                <div className="max-h-[600px] overflow-y-auto">
+                  <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee ID
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("employeeId")}
+                      >
+                        <div className="flex items-center">
+                          Emp ID
+                          <SortIcon columnKey="employeeId" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee Name
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("employeeName")}
+                      >
+                        <div className="flex items-center">
+                          Employee Name
+                          <SortIcon columnKey="employeeName" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Department
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("department")}
+                      >
+                        <div className="flex items-center">
+                          Dept
+                          <SortIcon columnKey="department" />
+                        </div>
                       </th>
                       <th className="border border-gray-300 px-4 py-2 text-left">
                         Date of Joining
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
-                        %
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("percentage")}
+                      >
+                        <div className="flex items-center justify-center">
+                          %
+                          <SortIcon columnKey="percentage" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        GROSS SAL (R)
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("grossSal")}
+                      >
+                        <div className="flex items-center justify-end">
+                          GROSS (R)
+                          <SortIcon columnKey="grossSal" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        GROSS 2 (S)
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("gross2")}
+                      >
+                        <div className="flex items-center justify-end">
+                          GROSS 2 (S)
+                          <SortIcon columnKey="gross2" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Actual (Calculated)
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("actualCalculated")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Actual (Calculated)
+                          <SortIcon columnKey="actualCalculated" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Actual (HR)
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("actualHR")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Actual (HR)
+                          <SortIcon columnKey="actualHR" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Difference
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("difference")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Difference
+                          <SortIcon columnKey="difference" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
-                        Status
+                      <th 
+                        className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("status")}
+                      >
+                        <div className="flex items-center justify-center">
+                          Status
+                          <SortIcon columnKey="status" />
+                        </div>
                       </th>
                     </tr>
                   </thead>
@@ -1190,6 +1300,7 @@ useEffect(() => {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">

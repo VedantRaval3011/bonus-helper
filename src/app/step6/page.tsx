@@ -14,7 +14,7 @@ export default function Step6Page() {
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
-  
+
   // Sorting state
   const [sortConfig, setSortConfig] = useState<{
     key: string | null;
@@ -833,10 +833,10 @@ export default function Step6Page() {
           const empName = String(row[empNameIdx] || "")
             .trim()
             .toUpperCase();
-          
+
           // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
-          
+
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (!empId || isNaN(empId) || !empName) continue;
@@ -851,7 +851,7 @@ export default function Step6Page() {
           }
 
           const emp = staffEmployees.get(empId)!;
-          
+
           // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
@@ -954,10 +954,10 @@ export default function Step6Page() {
           const empName = String(row[empNameIdx] || "")
             .trim()
             .toUpperCase();
-          
+
           // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
-          
+
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (deptIdx !== -1) {
@@ -981,7 +981,7 @@ export default function Step6Page() {
           }
 
           const emp = workerEmployees.get(empId)!;
-          
+
           // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
@@ -1033,7 +1033,7 @@ export default function Step6Page() {
 
           let estOct = 0;
           let total = baseSum;
-          
+
           const sepData = rec.months.get("2025-09");
           const hasSep2025 = sepData && sepData.hasValue && sepData.value > 0;
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
@@ -1048,9 +1048,13 @@ export default function Step6Page() {
             const values = monthsIncluded.map((m) => m.value);
             estOct = values.reduce((a, b) => a + b, 0) / values.length;
             total = baseSum + estOct;
-            
+
             console.log(
-              `📊 EMP ${empId} (${rec.name}): Avg from ${monthsIncluded.length} months with values = ₹${estOct.toFixed(2)}, Total = ₹${total.toFixed(2)}`
+              `📊 EMP ${empId} (${rec.name}): Avg from ${
+                monthsIncluded.length
+              } months with values = ₹${estOct.toFixed(
+                2
+              )}, Total = ₹${total.toFixed(2)}`
             );
           }
 
@@ -1198,7 +1202,7 @@ export default function Step6Page() {
   // Handle column sorting
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
-    
+
     if (sortConfig.key === key) {
       if (sortConfig.direction === "asc") {
         direction = "desc";
@@ -1208,14 +1212,14 @@ export default function Step6Page() {
         return;
       }
     }
-    
+
     setSortConfig({ key, direction });
   };
 
   // Sort icon component
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     const isActive = sortConfig.key === columnKey;
-    
+
     return (
       <div className="inline-flex flex-col ml-1">
         <svg
@@ -1530,222 +1534,224 @@ export default function Step6Page() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("employeeId")}
-                      >
-                        <div className="flex items-center">
-                          Emp ID
-                          <SortIcon columnKey="employeeId" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("employeeName")}
-                      >
-                        <div className="flex items-center">
-                          Name
-                          <SortIcon columnKey="employeeName" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("department")}
-                      >
-                        <div className="flex items-center">
-                          Dept
-                          <SortIcon columnKey="department" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("monthsOfService")}
-                      >
-                        <div className="flex items-center justify-center">
-                          MOS
-                          <SortIcon columnKey="monthsOfService" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("isEligible")}
-                      >
-                        <div className="flex items-center justify-center">
-                          Eligible
-                          <SortIcon columnKey="isEligible" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("percentage")}
-                      >
-                        <div className="flex items-center justify-center">
-                          %
-                          <SortIcon columnKey="percentage" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("grossSalarySoftware")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Gross (SW)
-                          <SortIcon columnKey="grossSalarySoftware" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("registerSoftware")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Register (SW)
-                          <SortIcon columnKey="registerSoftware" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("registerHR")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Register (HR)
-                          <SortIcon columnKey="registerHR" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("unpaidSoftware")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Unpaid (SW)
-                          <SortIcon columnKey="unpaidSoftware" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("unpaidHR")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Unpaid (HR)
-                          <SortIcon columnKey="unpaidHR" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("difference")}
-                      >
-                        <div className="flex items-center justify-end">
-                          Diff
-                          <SortIcon columnKey="difference" />
-                        </div>
-                      </th>
-                      <th 
-                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                        onClick={() => handleSort("status")}
-                      >
-                        <div className="flex items-center justify-center">
-                          Status
-                          <SortIcon columnKey="status" />
-                        </div>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((row, idx) => (
-                      <tr
-                        key={idx}
-                        className={`${
-                          idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                        } ${row.validationError ? "bg-red-50" : ""} ${
-                          row.hrOccurrences > 1 ? "bg-yellow-50" : ""
-                        }`}
-                      >
-                        <td className="border border-gray-300 px-3 py-2">
-                          {row.employeeId}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2">
-                          {row.employeeName}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              row.department === "Staff"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-purple-100 text-purple-800"
-                            }`}
-                          >
-                            {row.department}
-                          </span>
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-center">
-                          {row.monthsOfService || 0}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-center">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              row.isEligible
-                                ? "bg-green-100 text-green-800"
-                                : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {row.isEligible ? "YES" : "NO"}
-                          </span>
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-center">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              row.percentage === 12.0
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {row.percentage}%
-                          </span>
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right">
-                          {formatCurrency(row.grossSalarySoftware)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right">
-                          {formatCurrency(row.registerSoftware)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right">
-                          {formatCurrency(row.registerHR)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
-                          {formatCurrency(row.unpaidSoftware)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
-                          {formatCurrency(row.unpaidHR)}
-                        </td>
-                        <td
-                          className={`border border-gray-300 px-3 py-2 text-right font-medium ${
-                            Math.abs(row.difference) <= TOLERANCE
-                              ? "text-green-600"
-                              : "text-red-600"
+                <div className="max-h-[600px] overflow-y-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeId")}
+                        >
+                          <div className="flex items-center">
+                            Emp ID
+                            <SortIcon columnKey="employeeId" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("employeeName")}
+                        >
+                          <div className="flex items-center">
+                            Name
+                            <SortIcon columnKey="employeeName" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("department")}
+                        >
+                          <div className="flex items-center">
+                            Dept
+                            <SortIcon columnKey="department" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("monthsOfService")}
+                        >
+                          <div className="flex items-center justify-center">
+                            MOS
+                            <SortIcon columnKey="monthsOfService" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("isEligible")}
+                        >
+                          <div className="flex items-center justify-center">
+                            Eligible
+                            <SortIcon columnKey="isEligible" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("percentage")}
+                        >
+                          <div className="flex items-center justify-center">
+                            %
+                            <SortIcon columnKey="percentage" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("grossSalarySoftware")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Gross (SW)
+                            <SortIcon columnKey="grossSalarySoftware" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("registerSoftware")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Register (SW)
+                            <SortIcon columnKey="registerSoftware" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("registerHR")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Register (HR)
+                            <SortIcon columnKey="registerHR" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("unpaidSoftware")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Unpaid (SW)
+                            <SortIcon columnKey="unpaidSoftware" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("unpaidHR")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Unpaid (HR)
+                            <SortIcon columnKey="unpaidHR" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("difference")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Diff
+                            <SortIcon columnKey="difference" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("status")}
+                        >
+                          <div className="flex items-center justify-center">
+                            Status
+                            <SortIcon columnKey="status" />
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredData.map((row, idx) => (
+                        <tr
+                          key={idx}
+                          className={`${
+                            idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                          } ${row.validationError ? "bg-red-50" : ""} ${
+                            row.hrOccurrences > 1 ? "bg-yellow-50" : ""
                           }`}
                         >
-                          {formatCurrency(row.difference)}
-                        </td>
-                        <td className="border border-gray-300 px-3 py-2 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-medium ${
-                              row.status === "Match"
-                                ? "bg-green-100 text-green-800"
-                                : row.status === "Error"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-orange-100 text-orange-800"
+                          <td className="border border-gray-300 px-3 py-2">
+                            {row.employeeId}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2">
+                            {row.employeeName}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2">
+                            <span
+                              className={`px-2 py-1 rounded text-xs font-medium ${
+                                row.department === "Staff"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-purple-100 text-purple-800"
+                              }`}
+                            >
+                              {row.department}
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-center">
+                            {row.monthsOfService || 0}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-center">
+                            <span
+                              className={`px-2 py-1 rounded text-xs font-medium ${
+                                row.isEligible
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {row.isEligible ? "YES" : "NO"}
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-center">
+                            <span
+                              className={`px-2 py-1 rounded text-xs font-medium ${
+                                row.percentage === 12.0
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {row.percentage}%
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right">
+                            {formatCurrency(row.grossSalarySoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right">
+                            {formatCurrency(row.registerSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right">
+                            {formatCurrency(row.registerHR)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
+                            {formatCurrency(row.unpaidSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
+                            {formatCurrency(row.unpaidHR)}
+                          </td>
+                          <td
+                            className={`border border-gray-300 px-3 py-2 text-right font-medium ${
+                              Math.abs(row.difference) <= TOLERANCE
+                                ? "text-green-600"
+                                : "text-red-600"
                             }`}
-                            title={row.validationError || ""}
                           >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {formatCurrency(row.difference)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-center">
+                            <span
+                              className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                row.status === "Match"
+                                  ? "bg-green-100 text-green-800"
+                                  : row.status === "Error"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-orange-100 text-orange-800"
+                              }`}
+                              title={row.validationError || ""}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {filteredData.some((r) => r.validationError) && (
