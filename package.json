@@ -12,6 +12,7 @@
     "bcryptjs": "^3.0.2",
     "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.545.0",
     "mongoose": "^8.18.3",
     "multer": "^2.0.2",
     "next": "15.5.4",

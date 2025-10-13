@@ -71,277 +71,341 @@ export default function Step2Page() {
   );
 
   // In your Step2 component file
-// 1) helper to post messages
-async function postAuditMessages(items: any[], batchId?: string, step?: number) {
-  await fetch('/api/audit/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchId, step, items }),
-  });
-}
-// 2) build metric snapshots (A,B,C,D,E) for all months from reportData
-function buildMetricSnapshotMessages(reportData: ReportData) {
-  // Expecting rows: Software, HR, A,N,C (extras), diff
-  const software = reportData.departments.find((d) => d.name === 'Software')?.data || {};
-  const hr = reportData.departments.find((d) => d.name === 'HR')?.data || {};
-  const extras = reportData.departments.find((d) => d.name === 'A,N,C')?.data || {};
-  const diff = reportData.departments.find((d) => d.name === 'diff')?.data || {};
-
-  const metrics = ['A', 'B', 'C', 'D', 'E'] as const;
-
-  const items = [];
-  for (const m of reportData.months) {
-    const snapshot: Record<string, any> = {};
-    for (const k of metrics) {
-      snapshot[k] = {
-        software: software[m]?.[k] ?? null,
-        hr: hr[m]?.[k] ?? null,
-        diff: diff[m]?.[k] ?? null,
-        extras: k === 'B' ? extras[m]?.[k] ?? null : null, // only B has extras
-      };
-    }
-    items.push({
-      level: 'info',
-      tag: 'metric-snapshot',
-      text: `Metric snapshot for ${m}`,
-      scope: 'global',
-      source: 'step2',
-      meta: { month: m, snapshot },
+  // 1) helper to post messages
+  async function postAuditMessages(
+    items: any[],
+    batchId?: string,
+    step?: number
+  ) {
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId, step, items }),
     });
   }
-  return items;
-}
+  // 2) build metric snapshots (A,B,C,D,E) for all months from reportData
+  function buildMetricSnapshotMessages(reportData: ReportData) {
+    // Expecting rows: Software, HR, A,N,C (extras), diff
+    const software =
+      reportData.departments.find((d) => d.name === "Software")?.data || {};
+    const hr = reportData.departments.find((d) => d.name === "HR")?.data || {};
+    const extras =
+      reportData.departments.find((d) => d.name === "A,N,C")?.data || {};
+    const diff =
+      reportData.departments.find((d) => d.name === "diff")?.data || {};
 
-// 3) build mismatch messages (only if comparisonResults is present)
-function buildMismatchMessages(comparisonResults: ComparisonResults | null) {
-  if (!comparisonResults) return [];
-  const months = generateMonthHeaders(); // you already have this helper
+    const metrics = ["A", "B", "C", "D", "E"] as const;
 
-  const items: any[] = [];
-  const buildFor = (list: EmployeeComparison[], scope: 'staff' | 'worker') => {
-    for (const emp of list) {
-      // missing in HR / missing in Actual
-      if (emp.missingInHR) {
-        items.push({
-          level: 'warning',
-          tag: 'missing-in-hr',
-          text: `Missing in HR: ${emp.employeeCode} ${emp.name} (${emp.department})`,
-          scope,
-          source: 'step2',
-          meta: { employeeCode: emp.employeeCode, name: emp.name, department: emp.department },
-        });
+    const items = [];
+    for (const m of reportData.months) {
+      const snapshot: Record<string, any> = {};
+      for (const k of metrics) {
+        snapshot[k] = {
+          software: software[m]?.[k] ?? null,
+          hr: hr[m]?.[k] ?? null,
+          diff: diff[m]?.[k] ?? null,
+          extras: k === "B" ? extras[m]?.[k] ?? null : null, // only B has extras
+        };
       }
-      if (emp.missingInActual) {
-        items.push({
-          level: 'warning',
-          tag: 'missing-in-actual',
-          text: `Missing in Actual: ${emp.employeeCode} ${emp.name} (${emp.department})`,
-          scope,
-          source: 'step2',
-          meta: { employeeCode: emp.employeeCode, name: emp.name, department: emp.department },
-        });
-      }
+      items.push({
+        level: "info",
+        tag: "metric-snapshot",
+        text: `Metric snapshot for ${m}`,
+        scope: "global",
+        source: "step2",
+        meta: { month: m, snapshot },
+      });
+    }
+    return items;
+  }
 
-      // per-month mismatches (abs diff >= 1) excluding ignorable months
-      for (const m of months) {
-        const actual = emp.actualSalaries[m] ?? 0;
-        const hr = emp.hrSalaries[m] ?? 0;
-        const diff = actual - hr;
-        const hasDiff = Math.abs(diff) >= 1;
-        const monthDept = emp.monthlyDepartments?.[m] || emp.department;
-        const shouldIgnore =
-          (monthDept || '').toString().toUpperCase() === 'C' ||
-          (monthDept || '').toString().toUpperCase() === 'A' ||
-          (emp.employeeCode || '').toString().toUpperCase() === 'N';
+  // 3) build mismatch messages (only if comparisonResults is present)
+  function buildMismatchMessages(comparisonResults: ComparisonResults | null) {
+    if (!comparisonResults) return [];
+    const months = generateMonthHeaders(); // you already have this helper
 
-        if (hasDiff && !shouldIgnore) {
+    const items: any[] = [];
+    const buildFor = (
+      list: EmployeeComparison[],
+      scope: "staff" | "worker"
+    ) => {
+      for (const emp of list) {
+        // missing in HR / missing in Actual
+        if (emp.missingInHR) {
           items.push({
-            level: 'error',
-            tag: 'mismatch',
-            text: `[${scope}] ${emp.employeeCode} ${emp.name} ${m} diff=${diff} (actual=${actual}, hr=${hr})`,
+            level: "warning",
+            tag: "missing-in-hr",
+            text: `Missing in HR: ${emp.employeeCode} ${emp.name} (${emp.department})`,
             scope,
-            source: 'step2',
+            source: "step2",
             meta: {
               employeeCode: emp.employeeCode,
               name: emp.name,
               department: emp.department,
-              month: m,
-              actual,
-              hr,
-              diff,
             },
           });
         }
+        if (emp.missingInActual) {
+          items.push({
+            level: "warning",
+            tag: "missing-in-actual",
+            text: `Missing in Actual: ${emp.employeeCode} ${emp.name} (${emp.department})`,
+            scope,
+            source: "step2",
+            meta: {
+              employeeCode: emp.employeeCode,
+              name: emp.name,
+              department: emp.department,
+            },
+          });
+        }
+
+        // per-month mismatches (abs diff >= 1) excluding ignorable months
+        for (const m of months) {
+          const actual = emp.actualSalaries[m] ?? 0;
+          const hr = emp.hrSalaries[m] ?? 0;
+          const diff = actual - hr;
+          const hasDiff = Math.abs(diff) >= 1;
+          const monthDept = emp.monthlyDepartments?.[m] || emp.department;
+          const shouldIgnore =
+            (monthDept || "").toString().toUpperCase() === "C" ||
+            (monthDept || "").toString().toUpperCase() === "A" ||
+            (emp.employeeCode || "").toString().toUpperCase() === "N";
+
+          if (hasDiff && !shouldIgnore) {
+            items.push({
+              level: "error",
+              tag: "mismatch",
+              text: `[${scope}] ${emp.employeeCode} ${emp.name} ${m} diff=${diff} (actual=${actual}, hr=${hr})`,
+              scope,
+              source: "step2",
+              meta: {
+                employeeCode: emp.employeeCode,
+                name: emp.name,
+                department: emp.department,
+                month: m,
+                actual,
+                hr,
+                diff,
+              },
+            });
+          }
+        }
       }
-    }
-  };
+    };
 
-  buildFor(comparisonResults.staffComparisons, 'staff');
-  buildFor(comparisonResults.workerComparisons, 'worker');
-  return items;
-}
-
-async function storeAuditForGenerateReport(
-  reportData: ReportData,
-  comparisonResults: ComparisonResults | null
-) {
-  const batchId = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
-  const items = [
-    ...buildMetricSnapshotMessages(reportData),
-    ...buildMismatchMessages(comparisonResults),
-  ];
-  if (items.length > 0) {
-    await postAuditMessages(items, batchId, 2); // step 2
+    buildFor(comparisonResults.staffComparisons, "staff");
+    buildFor(comparisonResults.workerComparisons, "worker");
+    return items;
   }
-}
 
-  const calculateMonthlyDifferences = (): {
-    canProceed: boolean;
-    monthlyStats: Record<string, { totalDiff: number; employeeCount: number }>;
-  } => {
-    if (!comparisonResults) return { canProceed: true, monthlyStats: {} };
+  async function storeAuditForGenerateReport(
+    reportData: ReportData,
+    comparisonResults: ComparisonResults | null
+  ) {
+    const batchId =
+      crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+    const items = [
+      ...buildMetricSnapshotMessages(reportData),
+      ...buildMismatchMessages(comparisonResults),
+    ];
+    if (items.length > 0) {
+      await postAuditMessages(items, batchId, 2); // step 2
+    }
+  }
 
-    const months = generateMonthHeaders();
-    const monthlyStats: Record<
-      string,
-      { totalDiff: number; employeeCount: number }
-    > = {};
-    let canProceed = true;
+ const calculateMonthlyDifferences = (): {
+  canProceed: boolean;
+  monthlyStats: Record<string, { totalDiff: number; employeeCount: number }>;
+} => {
+  if (!comparisonResults) return { canProceed: true, monthlyStats: {} };
 
-    months.forEach((month) => {
-      let totalDiff = 0;
-      let employeeCount = 0;
+  const months = generateMonthHeaders();
+  const monthlyStats: Record<
+  string,
+    { totalDiff: number; employeeCount: number }
+  > = {};
+  let canProceed = true;
 
-      // Calculate for staff
-      comparisonResults.staffComparisons.forEach((emp) => {
-        const actualSal = emp.actualSalaries[month] || 0;
-        const hrSal = emp.hrSalaries[month] || 0;
-        const diff = Math.abs(actualSal - hrSal);
+  months.forEach((month) => {
+    let totalDiff = 0;
+    let employeeCount = 0;
 
-        if (actualSal > 0 || hrSal > 0) {
-          employeeCount++;
-          totalDiff += diff;
-        }
-      });
+    // Calculate for staff
+    comparisonResults.staffComparisons.forEach((emp) => {
+      const actualSal = emp.actualSalaries[month] || 0;
+      const hrSal = emp.hrSalaries[month] || 0;
+      const diff = Math.abs(actualSal - hrSal);
 
-      // Calculate for workers
-      comparisonResults.workerComparisons.forEach((emp) => {
-        const aRaw = emp.actualSalaries[month];
-        const hRaw = emp.hrSalaries[month];
-        const hasA = aRaw !== undefined && !isNaN(aRaw as number);
-        const hasH = hRaw !== undefined && !isNaN(hRaw as number);
-        const a = hasA ? (aRaw as number) : 0;
-        const h = hasH ? (hRaw as number) : 0;
-        if (hasA || hasH) {
-          employeeCount++;
-          totalDiff += Math.abs(a - h);
-        }
-      });
-
-      monthlyStats[month] = { totalDiff, employeeCount };
-
-      // Check if difference exceeds employee count
-      if (totalDiff > employeeCount) {
-        canProceed = false;
+      if (actualSal > 0 || hrSal > 0) {
+        employeeCount++;
+        totalDiff += diff;
       }
     });
 
-    return { canProceed, monthlyStats };
-  };
+    // Calculate for workers
+    comparisonResults.workerComparisons.forEach((emp) => {
+      const aRaw = emp.actualSalaries[month];
+      const hRaw = emp.hrSalaries[month];
+      const hasA = aRaw !== undefined && !isNaN(aRaw as number);
+      const hasH = hRaw !== undefined && !isNaN(hRaw as number);
+      const a = hasA ? (aRaw as number) : 0;
+      const h = hasH ? (hRaw as number) : 0;
+      if (hasA || hasH) {
+        employeeCount++;
+        totalDiff += Math.abs(a - h);
+      }
+    });
 
-const getCellNumericValue = (
-  cell: ExcelJS.Cell
-): { hasValue: boolean; value: number } => {
-  const v: any = cell.value;
+    monthlyStats[month] = { totalDiff, employeeCount };
 
-  // Null/undefined are blank
-  if (v === null || v === undefined) {
-    return { hasValue: false, value: 0 };
-  }
+    // ✅ NEW: Only block if absolute difference exceeds employee count
+    // This allows for negative differences (like -41) as long as |diff| < employeeCount
+    if (Math.abs(totalDiff) > employeeCount) {
+      canProceed = false;
+      console.log(`⚠️ Month ${month}: |diff| (${Math.abs(totalDiff)}) > employees (${employeeCount})`);
+    } else {
+      console.log(`✅ Month ${month}: |diff| (${Math.abs(totalDiff)}) <= employees (${employeeCount})`);
+    }
+  });
 
-  // ✅ Handle formula objects (both regular and shared formulas)
-  if (typeof v === "object" && v !== null) {
-    // Check if it has a result field
-    if ("result" in v) {
-      const res = v.result;
-      
-      if (res !== null && res !== undefined) {
-        if (typeof res === "number") {
-          return { hasValue: true, value: res };
-        }
-        
-        if (typeof res === "string") {
-          const s = String(res).trim();
-          if (!s || s === "-") {
-            return { hasValue: false, value: 0 };
+  return { canProceed, monthlyStats };
+};
+
+  const getCellNumericValue = (
+    cell: ExcelJS.Cell
+  ): { hasValue: boolean; value: number } => {
+    const v: any = cell.value;
+
+    // Null/undefined are blank
+    if (v === null || v === undefined) {
+      return { hasValue: false, value: 0 };
+    }
+
+    // ✅ Handle formula objects (both regular and shared formulas)
+    if (typeof v === "object" && v !== null) {
+      // Check if it has a result field
+      if ("result" in v) {
+        const res = v.result;
+
+        if (res !== null && res !== undefined) {
+          if (typeof res === "number") {
+            return { hasValue: true, value: res };
           }
-          const n = Number(s.replace(/,/g, ""));
-          if (Number.isFinite(n)) {
-            return { hasValue: true, value: n };
+
+          if (typeof res === "string") {
+            const s = String(res).trim();
+            if (!s || s === "-") {
+              return { hasValue: false, value: 0 };
+            }
+            const n = Number(s.replace(/,/g, ""));
+            if (Number.isFinite(n)) {
+              return { hasValue: true, value: n };
+            }
           }
         }
       }
-    }
-    
-    // ✅ For shared formulas without results, check the cell's master formula
-    // If sharedFormula exists but no result, try cell.text
-    if ("sharedFormula" in v && !("result" in v)) {
-      // Fall through to cell.text check below
-    } else {
-      // Other object types without valid result = no value
-      return { hasValue: false, value: 0 };
-    }
-  }
 
-  // Strings
-  if (typeof v === "string") {
-    const s = v.trim();
-    if (!s || s === "-") {
+      // ✅ For shared formulas without results, check the cell's master formula
+      // If sharedFormula exists but no result, try cell.text
+      if ("sharedFormula" in v && !("result" in v)) {
+        // Fall through to cell.text check below
+      } else {
+        // Other object types without valid result = no value
+        return { hasValue: false, value: 0 };
+      }
+    }
+
+    // Strings
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s || s === "-") {
+        return { hasValue: false, value: 0 };
+      }
+      const n = Number(s.replace(/,/g, ""));
+      return Number.isFinite(n)
+        ? { hasValue: true, value: n }
+        : { hasValue: false, value: 0 };
+    }
+
+    // Direct numbers
+    if (typeof v === "number") {
+      return { hasValue: true, value: v };
+    }
+
+    // ✅ Last resort: cell.text (for shared formulas without cached results)
+    const t = cell.text?.trim();
+
+    // ✅ SPECIAL CASE: If cell.text is empty but we know it's a formula cell,
+    // treat it as 0 (value exists, just equals zero)
+    if (typeof v === "object" && "sharedFormula" in v && (!t || t === "")) {
+      return { hasValue: true, value: 0 }; // ✅ This fixes April!
+    }
+
+    if (!t || t === "-") {
       return { hasValue: false, value: 0 };
     }
-    const n = Number(s.replace(/,/g, ""));
+
+    const n = Number(t.replace(/,/g, ""));
     return Number.isFinite(n)
       ? { hasValue: true, value: n }
       : { hasValue: false, value: 0 };
-  }
-
-  // Direct numbers
-  if (typeof v === "number") {
-    return { hasValue: true, value: v };
-  }
-
-  // ✅ Last resort: cell.text (for shared formulas without cached results)
-  const t = cell.text?.trim();
-  
-  // ✅ SPECIAL CASE: If cell.text is empty but we know it's a formula cell,
-  // treat it as 0 (value exists, just equals zero)
-  if (typeof v === "object" && "sharedFormula" in v && (!t || t === "")) {
-    return { hasValue: true, value: 0 };  // ✅ This fixes April!
-  }
-  
-  if (!t || t === "-") {
-    return { hasValue: false, value: 0 };
-  }
-  
-  const n = Number(t.replace(/,/g, ""));
-  return Number.isFinite(n)
-    ? { hasValue: true, value: n }
-    : { hasValue: false, value: 0 };
-};
-
-  const handleMoveToStep3 = () => {
-    const { canProceed } = calculateMonthlyDifferences();
-
-    if (canProceed) {
-      // Direct navigation to Step 3
-      router.push("/step3");
-    } else {
-      // Show password modal
-      setShowPasswordModal(true);
-      setPassword("");
-      setPasswordError("");
-    }
   };
+
+const handleMoveToStep3 = () => {
+  if (!reportData || !comparisonResults) {
+    router.push("/step3");
+    return;
+  }
+
+  let requirePassword = false;
+  const months = reportData.months;
+  const diffDept = reportData.departments.find(d => d.name === 'diff');
+  
+  if (diffDept) {
+    for (const month of months) {
+      const monthData = diffDept.data[month];
+      if (!monthData) continue;
+
+      // Count employees for this month
+      let employeeCount = 0;
+      comparisonResults.staffComparisons.forEach((emp) => {
+        if ((emp.actualSalaries[month] || 0) > 0 || (emp.hrSalaries[month] || 0) > 0) {
+          employeeCount++;
+        }
+      });
+      comparisonResults.workerComparisons.forEach((emp) => {
+        const aRaw = emp.actualSalaries[month];
+        const hRaw = emp.hrSalaries[month];
+        if ((aRaw !== undefined && !isNaN(aRaw as number)) || 
+            (hRaw !== undefined && !isNaN(hRaw as number))) {
+          employeeCount++;
+        }
+      });
+
+      // Check each metric individually
+      const metrics = ['A', 'B', 'C', 'D', 'E'] as const;
+      for (const metric of metrics) {
+        const diff = Math.abs(monthData[metric] || 0);
+        if (diff > employeeCount) {
+          console.log(`⚠️ ${month} ${metric}: |diff| (${diff}) > employees (${employeeCount})`);
+          requirePassword = true;
+          break;
+        }
+      }
+      
+      if (requirePassword) break;
+    }
+  }
+
+  if (requirePassword) {
+    setShowPasswordModal(true);
+    setPassword("");
+    setPasswordError("");
+  } else {
+    router.push("/step3");
+  }
+};
 
   const handlePasswordSubmit = () => {
     const expectedPassword = process.env.NEXT_PUBLIC_NEXT_PASSWORD;
@@ -614,7 +678,6 @@ const getCellNumericValue = (
     }
     return sum;
   };
-
 
   const readStaffSalary1Total = (ws: ExcelJS.Worksheet): number => {
     const header3 = ws.getRow(3);
@@ -1334,133 +1397,135 @@ const getCellNumericValue = (
     return totalOctober;
   };
 
-const extractStaffEmployees = (
-  wb: ExcelJS.Workbook,
-  sheetNames: string[]
-) => {
-  const employees: Record<string, EmployeeMonthlySalary> = {};
-  const months = generateMonthHeaders();
+  const extractStaffEmployees = (
+    wb: ExcelJS.Workbook,
+    sheetNames: string[]
+  ) => {
+    const employees: Record<string, EmployeeMonthlySalary> = {};
+    const months = generateMonthHeaders();
 
-  for (const sheetName of sheetNames) {
-    const ws = wb.getWorksheet(sheetName);
-    if (!ws) continue;
+    for (const sheetName of sheetNames) {
+      const ws = wb.getWorksheet(sheetName);
+      if (!ws) continue;
 
-    let headerRow = -1;
-    for (let r = 1; r <= 5; r++) {
-      const t = ws.getRow(r).getCell(2).value?.toString().toUpperCase() || "";
-      if (t.includes("EMP") && t.includes("ID")) {
-        headerRow = r;
-        break;
-      }
-    }
-    if (headerRow < 0) continue;
-
-    const monthKey = sheetNameToMonthKey(sheetName);
-    if (!monthKey) continue;
-
-    const empIdCol = 2,
-      deptCol = 3,
-      empNameCol = 5,
-      salary1Col = 15;
-
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r);
-
-      const empName =
-        row.getCell(empNameCol).value?.toString().trim().toUpperCase() || "";
-      if (!empName || empName.includes("TOTAL")) continue;
-
-      const empId = row.getCell(empIdCol).value?.toString().trim() || "";
-      const dept = (
-        row.getCell(deptCol).value?.toString().trim() || ""
-      ).toUpperCase();
-
-      const key = empId || empName;
-      
-      // 🐛 DETAILED DEBUG: Check what's actually in the cell
-      const cell = row.getCell(salary1Col);
-      const cellValue = cell.value;
-      const cellText = cell.text;
-      
-      if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
-        console.log(`\n🔍 ${monthKey} SANJAY RATHOD RAW DATA:`);
-        console.log(`   cell.value =`, cellValue);
-        console.log(`   cell.text =`, cellText);
-        console.log(`   typeof cell.value =`, typeof cellValue);
-        
-        if (cellValue && typeof cellValue === 'object') {
-          console.log(`   cell.value.result =`, (cellValue as any).result);
-          console.log(`   typeof result =`, typeof (cellValue as any).result);
+      let headerRow = -1;
+      for (let r = 1; r <= 5; r++) {
+        const t = ws.getRow(r).getCell(2).value?.toString().toUpperCase() || "";
+        if (t.includes("EMP") && t.includes("ID")) {
+          headerRow = r;
+          break;
         }
       }
-      
-      const s1 = getCellNumericValue(cell);
+      if (headerRow < 0) continue;
 
-      if (!employees[key]) {
-        employees[key] = {
-          name: empName,
-          employeeCode: empId || empName,
-          department: dept,
-          monthlySalaries: {},
-          monthlyDepartments: {},
-          source: "Staff",
-        };
-      }
+      const monthKey = sheetNameToMonthKey(sheetName);
+      if (!monthKey) continue;
 
-      if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
-        console.log(`   getCellNumericValue returned: hasValue=${s1.hasValue}, value=${s1.value}`);
-      }
+      const empIdCol = 2,
+        deptCol = 3,
+        empNameCol = 5,
+        salary1Col = 15;
 
-      if (s1.hasValue) {
-        employees[key].monthlySalaries[monthKey] = s1.value;
-        
-        if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
-          console.log(`   ✅ ${monthKey} INCLUDED: ${s1.value}`);
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+
+        const empName =
+          row.getCell(empNameCol).value?.toString().trim().toUpperCase() || "";
+        if (!empName || empName.includes("TOTAL")) continue;
+
+        const empId = row.getCell(empIdCol).value?.toString().trim() || "";
+        const dept = (
+          row.getCell(deptCol).value?.toString().trim() || ""
+        ).toUpperCase();
+
+        const key = empId || empName;
+
+        // 🐛 DETAILED DEBUG: Check what's actually in the cell
+        const cell = row.getCell(salary1Col);
+        const cellValue = cell.value;
+        const cellText = cell.text;
+
+        if (empName.includes("SANJAY") && empName.includes("RATHOD")) {
+          console.log(`\n🔍 ${monthKey} SANJAY RATHOD RAW DATA:`);
+          console.log(`   cell.value =`, cellValue);
+          console.log(`   cell.text =`, cellText);
+          console.log(`   typeof cell.value =`, typeof cellValue);
+
+          if (cellValue && typeof cellValue === "object") {
+            console.log(`   cell.value.result =`, (cellValue as any).result);
+            console.log(`   typeof result =`, typeof (cellValue as any).result);
+          }
         }
-      } else {
-        if (empName.includes('SANJAY') && empName.includes('RATHOD')) {
-          console.log(`   ❌ ${monthKey} SKIPPED\n`);
+
+        const s1 = getCellNumericValue(cell);
+
+        if (!employees[key]) {
+          employees[key] = {
+            name: empName,
+            employeeCode: empId || empName,
+            department: dept,
+            monthlySalaries: {},
+            monthlyDepartments: {},
+            source: "Staff",
+          };
+        }
+
+        if (empName.includes("SANJAY") && empName.includes("RATHOD")) {
+          console.log(
+            `   getCellNumericValue returned: hasValue=${s1.hasValue}, value=${s1.value}`
+          );
+        }
+
+        if (s1.hasValue) {
+          employees[key].monthlySalaries[monthKey] = s1.value;
+
+          if (empName.includes("SANJAY") && empName.includes("RATHOD")) {
+            console.log(`   ✅ ${monthKey} INCLUDED: ${s1.value}`);
+          }
+        } else {
+          if (empName.includes("SANJAY") && empName.includes("RATHOD")) {
+            console.log(`   ❌ ${monthKey} SKIPPED\n`);
+          }
+        }
+
+        if (dept) {
+          employees[key].monthlyDepartments![monthKey] = dept;
         }
       }
-
-      if (dept) {
-        employees[key].monthlyDepartments![monthKey] = dept;
-      }
     }
-  }
 
-  // Rest of the function remains the same...
-  const monthsReversed = [...months].reverse();
-  for (const key in employees) {
-    const emp = employees[key];
-    let finalDept = "";
+    // Rest of the function remains the same...
+    const monthsReversed = [...months].reverse();
+    for (const key in employees) {
+      const emp = employees[key];
+      let finalDept = "";
 
-    for (const m of monthsReversed) {
-      const d = emp.monthlyDepartments?.[m]?.toUpperCase();
-      if (d && !["C", "A"].includes(d)) {
-        finalDept = d;
-        break;
-      }
-    }
-    if (!finalDept && emp.monthlyDepartments?.["Sep-25"]) {
-      finalDept = emp.monthlyDepartments["Sep-25"].toUpperCase();
-    }
-    if (!finalDept) {
       for (const m of monthsReversed) {
         const d = emp.monthlyDepartments?.[m]?.toUpperCase();
-        if (d) {
+        if (d && !["C", "A"].includes(d)) {
           finalDept = d;
           break;
         }
       }
+      if (!finalDept && emp.monthlyDepartments?.["Sep-25"]) {
+        finalDept = emp.monthlyDepartments["Sep-25"].toUpperCase();
+      }
+      if (!finalDept) {
+        for (const m of monthsReversed) {
+          const d = emp.monthlyDepartments?.[m]?.toUpperCase();
+          if (d) {
+            finalDept = d;
+            break;
+          }
+        }
+      }
+
+      emp.department = finalDept || emp.department?.toUpperCase();
+      if (!emp.employeeCode) emp.employeeCode = key;
     }
 
-    emp.department = finalDept || emp.department?.toUpperCase();
-    if (!emp.employeeCode) emp.employeeCode = key;
-  }
-
-  return employees;
-};
+    return employees;
+  };
   const extractWorkerEmployees = (
     wb: ExcelJS.Workbook,
     sheetNames: string[]
@@ -1907,36 +1972,35 @@ const extractStaffEmployees = (
           const values: number[] = [];
 
           for (const month of monthsToAverage) {
-  const salary = emp.monthlySalaries[month];
-  
-  // ✅ NEW: Check if salary is actually present AND has a meaningful value
-  // undefined/null = month was blank in Excel (exclude from average)
-  // 0 or positive number = month had value in Excel (include in average, even if 0)
-  if (salary === undefined || salary === null) {
-    continue; // Skip months with no data
-  }
+            const salary = emp.monthlySalaries[month];
 
-  // Require a recorded month department; no fallback to current/Final
-  const monthDept = emp.monthlyDepartments?.[month];
-  if (!monthDept) continue;
+            // ✅ NEW: Check if salary is actually present AND has a meaningful value
+            // undefined/null = month was blank in Excel (exclude from average)
+            // 0 or positive number = month had value in Excel (include in average, even if 0)
+            if (salary === undefined || salary === null) {
+              continue; // Skip months with no data
+            }
 
-  const md = monthDept.toUpperCase();
-  if (md === "C" || md !== finalDept) continue;
+            // Require a recorded month department; no fallback to current/Final
+            const monthDept = emp.monthlyDepartments?.[month];
+            if (!monthDept) continue;
 
-  // ✅ Include the value (even if it's 0) because cell had a value
-  values.push(salary);
-}
+            const md = monthDept.toUpperCase();
+            if (md === "C" || md !== finalDept) continue;
 
+            // ✅ Include the value (even if it's 0) because cell had a value
+            values.push(salary);
+          }
 
           if (values.length > 0) {
             const average =
               values.reduce((sum, val) => sum + val, 0) / values.length;
             emp.monthlySalaries["Oct-25"] = Math.round(average * 2) / 2;
-             if (emp.name.includes('SANJAY') && emp.name.includes('RATHOD')) {
-    console.log(`\n📊 SANJAY RATHOD October Calculation:`);
-    console.log(`   Values: [${values.join(', ')}]`);
-    console.log(`   Average: ${average}`);
-  }
+            if (emp.name.includes("SANJAY") && emp.name.includes("RATHOD")) {
+              console.log(`\n📊 SANJAY RATHOD October Calculation:`);
+              console.log(`   Values: [${values.join(", ")}]`);
+              console.log(`   Average: ${average}`);
+            }
             if (emp.monthlyDepartments) {
               emp.monthlyDepartments["Oct-25"] =
                 emp.monthlyDepartments["Sep-25"] || emp.department;
@@ -2303,24 +2367,18 @@ const extractStaffEmployees = (
           const B_diff = B_v2 - B_v1 + B_extras;
 
           // C value calculation
-          const C_staffGross = calculateStaffGrossOctober(staffWb, staffMap);
-          const C_workerSalary1 = calculateOctoberAverageForWorker(
-            workerWb,
-            workerMap
-          );
-          const C_v1 = C_staffGross + C_workerSalary1;
-          const C_v2 = getCHR(monthWiseWb, workerWb, workerMap);
-          const C_diff = C_v2 - C_v1;
+          // C, D, E values are zero for October
+          const C_v1 = 0;
+          const C_v2 = 0;
+          const C_diff = 0;
 
-          // D value calculation
-          const D_v1 = C_v1;
-          const D_v2 = getDHR(bonusSummaryWb);
-          const D_diff = D_v2 - D_v1;
+          const D_v1 = 0;
+          const D_v2 = 0;
+          const D_diff = 0;
 
-          // E value calculation
-          const E_v1 = D_v1 * 0.0833;
-          const E_v2 = getEHR(bonusSummaryWb);
-          const E_diff = E_v2 - E_v1;
+          const E_v1 = 0;
+          const E_v2 = 0;
+          const E_diff = 0;
 
           software[m] = {
             A: round(A_v1),
@@ -2484,33 +2542,33 @@ const extractStaffEmployees = (
           E: 0,
         };
       }
-setReportData({
-  months,
-  departments: [
-    { name: 'Software', data: software },
-    { name: 'HR', data: hr },
-    { name: 'A,N,C', data: extras },
-    { name: 'diff', data: diff },
-  ],
-});
+      setReportData({
+        months,
+        departments: [
+          { name: "Software", data: software },
+          { name: "HR", data: hr },
+          { name: "A,N,C", data: extras },
+          { name: "diff", data: diff },
+        ],
+      });
 
-// Persist audit logs only for Generate Report
-try {
-  await storeAuditForGenerateReport(
-    {
-      months,
-      departments: [
-        { name: 'Software', data: software },
-        { name: 'HR', data: hr },
-        { name: 'A,N,C', data: extras },
-        { name: 'diff', data: diff },
-      ],
-    },
-    comparisonResults // may be null; handled in builder
-  );
-} catch (e) {
-  console.error('Audit store failed', e);
-}
+      // Persist audit logs only for Generate Report
+      try {
+        await storeAuditForGenerateReport(
+          {
+            months,
+            departments: [
+              { name: "Software", data: software },
+              { name: "HR", data: hr },
+              { name: "A,N,C", data: extras },
+              { name: "diff", data: diff },
+            ],
+          },
+          comparisonResults // may be null; handled in builder
+        );
+      } catch (e) {
+        console.error("Audit store failed", e);
+      }
     } catch (e) {
       console.error(e);
       alert("Error processing files. Please verify formats and sheet names.");
@@ -2967,14 +3025,7 @@ try {
           </div>
 
           <div className="flex justify-center gap-4 mb-8">
-            <button
-              onClick={processExcelFiles}
-              disabled={!staffFile || !workerFile || isGenerating}
-              className="px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {isGenerating ? "Generating Report..." : "Generate Report"}
-            </button>
-
+            {/* Step 1: Run Comparison button - Always clickable */}
             <button
               onClick={runSalaryComparison}
               disabled={!staffFile || !workerFile || !bonusFile || isComparing}
@@ -3018,11 +3069,64 @@ try {
                       d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
                     />
                   </svg>
-                  Run Comparison
+                  {comparisonResults ? "Re-run Comparison" : "Run Comparison"}
                 </>
               )}
             </button>
-            {(reportData || comparisonResults) && (
+
+            {/* Step 2: Generate Report button - Only visible after comparison */}
+            {comparisonResults && (
+              <button
+                onClick={processExcelFiles}
+                disabled={!staffFile || !workerFile || isGenerating}
+                className="px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isGenerating ? (
+                  <>
+                    <svg
+                      className="animate-spin h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Generating Report...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    {reportData ? "Re-generate Report" : "Generate Report"}
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Step 3: Move to Step 3 button - Only visible after report is generated */}
+            {reportData && (
               <button
                 onClick={handleMoveToStep3}
                 className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"

@@ -14,168 +14,203 @@ export default function Step6Page() {
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
+  
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState<{
+    key: string | null;
+    direction: "asc" | "desc" | null;
+  }>({ key: null, direction: null });
 
   // === Step 6 Audit Helpers ===
-const TOLERANCE_STEP6 = 12; // Step 6 uses ±12 to mark Match vs Mismatch
+  const TOLERANCE_STEP6 = 12;
 
-async function postAuditMessagesStep6(items: any[], batchId?: string) {
-  const bid =
-    batchId ||
-    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2));
-  await fetch('/api/audit/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchId: bid, step: 6, items }),
-  });
-  return bid;
-}
+  async function postAuditMessagesStep6(items: any[], batchId?: string) {
+    const bid =
+      batchId ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: bid, step: 6, items }),
+    });
+    return bid;
+  }
 
-function buildStep6MismatchMessages(rows: any[]) {
-  // Expecting rows with: { employeeId, employeeName, department, monthsOfService, isEligible, percentage, grossSalarySoftware, registerSoftware, registerHR, unpaidSoftware, unpaidHR, hrOccurrences, difference, status, validationError }
-  const items: any[] = [];
-  for (const r of rows) {
-    if (r?.status === 'Mismatch' || r?.status === 'Error') {
-      items.push({
-        level: r.status === 'Error' ? 'error' : 'warning',
-        tag: r.status === 'Error' ? 'validation-error' : 'mismatch',
-        text: `[step6] ${r.employeeId} ${r.employeeName} ${r.status === 'Error' ? 'Validation Error' : `diff=${Number(r.difference ?? 0).toFixed(2)}`}`,
-        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
-        source: 'step6',
-        meta: {
-          employeeId: r.employeeId,
-          name: r.employeeName,
-          department: r.department,
-          monthsOfService: r.monthsOfService,
-          isEligible: r.isEligible,
-          percentage: r.percentage,
-          grossSalarySoftware: r.grossSalarySoftware,
-          registerSoftware: r.registerSoftware,
-          registerHR: r.registerHR,
-          unpaidSoftware: r.unpaidSoftware,
-          unpaidHR: r.unpaidHR,
-          hrOccurrences: r.hrOccurrences,
-          diff: r.difference,
-          status: r.status,
-          validationError: r.validationError || null,
+  function buildStep6MismatchMessages(rows: any[]) {
+    const items: any[] = [];
+    for (const r of rows) {
+      if (r?.status === "Mismatch" || r?.status === "Error") {
+        items.push({
+          level: r.status === "Error" ? "error" : "warning",
+          tag: r.status === "Error" ? "validation-error" : "mismatch",
+          text: `[step6] ${r.employeeId} ${r.employeeName} ${
+            r.status === "Error"
+              ? "Validation Error"
+              : `diff=${Number(r.difference ?? 0).toFixed(2)}`
+          }`,
+          scope:
+            r.department === "Staff"
+              ? "staff"
+              : r.department === "Worker"
+              ? "worker"
+              : "global",
+          source: "step6",
+          meta: {
+            employeeId: r.employeeId,
+            name: r.employeeName,
+            department: r.department,
+            monthsOfService: r.monthsOfService,
+            isEligible: r.isEligible,
+            percentage: r.percentage,
+            grossSalarySoftware: r.grossSalarySoftware,
+            registerSoftware: r.registerSoftware,
+            registerHR: r.registerHR,
+            unpaidSoftware: r.unpaidSoftware,
+            unpaidHR: r.unpaidHR,
+            hrOccurrences: r.hrOccurrences,
+            diff: r.difference,
+            status: r.status,
+            validationError: r.validationError || null,
+            tolerance: TOLERANCE_STEP6,
+          },
+        });
+      }
+    }
+    return items;
+  }
+
+  function buildStep6SummaryMessage(rows: any[]) {
+    const total = rows.length || 0;
+    const matches = rows.filter((r) => r.status === "Match").length;
+    const mismatches = rows.filter((r) => r.status === "Mismatch").length;
+    const errors = rows.filter((r) => r.status === "Error").length;
+
+    const staffRows = rows.filter((r) => r.department === "Staff");
+    const workerRows = rows.filter((r) => r.department === "Worker");
+
+    const staffMismatch = staffRows.filter(
+      (r) => r.status === "Mismatch" || r.status === "Error"
+    ).length;
+    const workerMismatch = workerRows.filter(
+      (r) => r.status === "Mismatch" || r.status === "Error"
+    ).length;
+
+    const eligible = rows.filter((r) => r.isEligible).length;
+    const notEligible = rows.filter((r) => !r.isEligible).length;
+    const duplicates = rows.filter((r) => r.hrOccurrences > 1).length;
+
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const staffRegSWSum = sum(
+      staffRows.map((r) => Number(r.registerSoftware || 0))
+    );
+    const staffRegHRSum = sum(staffRows.map((r) => Number(r.registerHR || 0)));
+    const staffUnpaidSWSum = sum(
+      staffRows.map((r) => Number(r.unpaidSoftware || 0))
+    );
+    const staffUnpaidHRSum = sum(staffRows.map((r) => Number(r.unpaidHR || 0)));
+
+    const workerRegSWSum = sum(
+      workerRows.map((r) => Number(r.registerSoftware || 0))
+    );
+    const workerRegHRSum = sum(
+      workerRows.map((r) => Number(r.registerHR || 0))
+    );
+    const workerUnpaidSWSum = sum(
+      workerRows.map((r) => Number(r.unpaidSoftware || 0))
+    );
+    const workerUnpaidHRSum = sum(
+      workerRows.map((r) => Number(r.unpaidHR || 0))
+    );
+
+    return {
+      level: "info",
+      tag: "summary",
+      text: `Step6 run: total=${total} match=${matches} mismatch=${mismatches} error=${errors}`,
+      scope: "global",
+      source: "step6",
+      meta: {
+        totals: {
+          total,
+          matches,
+          mismatches,
+          errors,
+          eligible,
+          notEligible,
+          duplicates,
           tolerance: TOLERANCE_STEP6,
         },
-      });
-    }
+        staff: {
+          count: staffRows.length,
+          issues: staffMismatch,
+          registerSWSum: staffRegSWSum,
+          registerHRSum: staffRegHRSum,
+          unpaidSWSum: staffUnpaidSWSum,
+          unpaidHRSum: staffUnpaidHRSum,
+        },
+        worker: {
+          count: workerRows.length,
+          issues: workerMismatch,
+          registerSWSum: workerRegSWSum,
+          registerHRSum: workerRegHRSum,
+          unpaidSWSum: workerUnpaidSWSum,
+          unpaidHRSum: workerUnpaidHRSum,
+        },
+      },
+    };
   }
-  return items;
-}
 
-function buildStep6SummaryMessage(rows: any[]) {
-  const total = rows.length || 0;
-  const matches = rows.filter((r) => r.status === 'Match').length;
-  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
-  const errors = rows.filter((r) => r.status === 'Error').length;
+  async function handleSaveAuditStep6(rows: any[]) {
+    if (!rows || rows.length === 0) return;
+    const items = [
+      buildStep6SummaryMessage(rows),
+      ...buildStep6MismatchMessages(rows),
+    ];
+    if (items.length === 0) return;
+    await postAuditMessagesStep6(items);
+  }
 
-  const staffRows = rows.filter((r) => r.department === 'Staff');
-  const workerRows = rows.filter((r) => r.department === 'Worker');
+  function djb2Hash(str: string) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  }
 
-  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch' || r.status === 'Error').length;
-  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch' || r.status === 'Error').length;
+  function buildRunKeyStep6(rows: any[]) {
+    const sig = rows
+      .map(
+        (r) =>
+          `${r.employeeId}|${r.department}|${Number(r.unpaidSoftware) || 0}|${
+            Number(r.unpaidHR) || 0
+          }|${Number(r.difference) || 0}|${r.status}|${r.isEligible}`
+      )
+      .join(";");
+    return djb2Hash(sig);
+  }
 
-  const eligible = rows.filter((r) => r.isEligible).length;
-  const notEligible = rows.filter((r) => !r.isEligible).length;
-  const duplicates = rows.filter((r) => r.hrOccurrences > 1).length;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
 
-  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  const staffRegSWSum = sum(staffRows.map((r) => Number(r.registerSoftware || 0)));
-  const staffRegHRSum = sum(staffRows.map((r) => Number(r.registerHR || 0)));
-  const staffUnpaidSWSum = sum(staffRows.map((r) => Number(r.unpaidSoftware || 0)));
-  const staffUnpaidHRSum = sum(staffRows.map((r) => Number(r.unpaidHR || 0)));
+    const runKey = buildRunKeyStep6(comparisonData);
+    const markerKey = `audit_step6_${runKey}`;
 
-  const workerRegSWSum = sum(workerRows.map((r) => Number(r.registerSoftware || 0)));
-  const workerRegHRSum = sum(workerRows.map((r) => Number(r.registerHR || 0)));
-  const workerUnpaidSWSum = sum(workerRows.map((r) => Number(r.unpaidSoftware || 0)));
-  const workerUnpaidHRSum = sum(workerRows.map((r) => Number(r.unpaidHR || 0)));
+    if (sessionStorage.getItem(markerKey)) return;
 
-  return {
-    level: 'info',
-    tag: 'summary',
-    text: `Step6 run: total=${total} match=${matches} mismatch=${mismatches} error=${errors}`,
-    scope: 'global',
-    source: 'step6',
-    meta: {
-      totals: { total, matches, mismatches, errors, eligible, notEligible, duplicates, tolerance: TOLERANCE_STEP6 },
-      staff: {
-        count: staffRows.length,
-        issues: staffMismatch,
-        registerSWSum: staffRegSWSum,
-        registerHRSum: staffRegHRSum,
-        unpaidSWSum: staffUnpaidSWSum,
-        unpaidHRSum: staffUnpaidHRSum,
-      },
-      worker: {
-        count: workerRows.length,
-        issues: workerMismatch,
-        registerSWSum: workerRegSWSum,
-        registerHRSum: workerRegHRSum,
-        unpaidSWSum: workerUnpaidSWSum,
-        unpaidHRSum: workerUnpaidHRSum,
-      },
-    },
-  };
-}
+    sessionStorage.setItem(markerKey, "1");
+    const deterministicBatchId = `step6-${runKey}`;
 
-async function handleSaveAuditStep6(rows: any[]) {
-  if (!rows || rows.length === 0) return;
-  const items = [buildStep6SummaryMessage(rows), ...buildStep6MismatchMessages(rows)];
-  if (items.length === 0) return;
-  await postAuditMessagesStep6(items);
-}
+    const items = [
+      buildStep6SummaryMessage(comparisonData),
+      ...buildStep6MismatchMessages(comparisonData),
+    ];
 
-// Stable hash for run signature
-function djb2Hash(str: string) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
-  return (h >>> 0).toString(36);
-}
-
-function buildRunKeyStep6(rows: any[]) {
-  const sig = rows
-    .map(r =>
-      `${r.employeeId}|${r.department}|${Number(r.unpaidSoftware)||0}|${Number(r.unpaidHR)||0}|${Number(r.difference)||0}|${r.status}|${r.isEligible}`
-    )
-    .join(';');
-  return djb2Hash(sig);
-}
-
-useEffect(() => {
-  if (typeof window === 'undefined') return; // SSR guard
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const runKey = buildRunKeyStep6(comparisonData);
-  const markerKey = `audit_step6_${runKey}`;
-
-  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
-
-  sessionStorage.setItem(markerKey, '1');
-  const deterministicBatchId = `step6-${runKey}`;
-
-  const items = [buildStep6SummaryMessage(comparisonData), ...buildStep6MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep6(items, deterministicBatchId).catch(err => {
-    console.error('Auto-audit step6 failed', err);
-    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
-  });
-}, [comparisonData]);
-
-useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const batchId = `step6-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const items = [buildStep6SummaryMessage(comparisonData), ...buildStep6MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep6(items, batchId).catch(err => console.error('Auto-audit step6 failed', err));
-}, [comparisonData]);
-
-
+    postAuditMessagesStep6(items, deterministicBatchId).catch((err) => {
+      console.error("Auto-audit step6 failed", err);
+      sessionStorage.removeItem(markerKey);
+    });
+  }, [comparisonData]);
 
   type FileSlot = { type: string; file: File | null };
 
@@ -208,99 +243,153 @@ useEffect(() => {
     pickFile((s) => s.type === "Due-Voucher-List") ??
     pickFile((s) => !!s.file && /due.*voucher/i.test(s.file.name));
 
-  // Helper to normalize header text
   const norm = (x: any) =>
     String(x ?? "")
       .replace(/\s+/g, "")
       .replace(/[-_.]/g, "")
       .toUpperCase();
 
-  // Constants from Step 5
+  // 🎯 NEW: Helper function to distinguish between 0 and blank cells
+  const getCellValue = (cell: any): { hasValue: boolean; value: number } => {
+    // Null/undefined are blank
+    if (cell == null || cell === "") {
+      return { hasValue: false, value: 0 };
+    }
+
+    // Direct number
+    if (typeof cell === "number") {
+      return { hasValue: true, value: cell };
+    }
+
+    // String handling
+    if (typeof cell === "string") {
+      const trimmed = cell.trim();
+      // Empty string or just "-" is blank
+      if (!trimmed || trimmed === "-") {
+        return { hasValue: false, value: 0 };
+      }
+      // Try to parse as number
+      const parsed = Number(trimmed.replace(/,/g, ""));
+      if (!isNaN(parsed)) {
+        return { hasValue: true, value: parsed };
+      }
+      return { hasValue: false, value: 0 };
+    }
+
+    // Default: treat as blank
+    return { hasValue: false, value: 0 };
+  };
+
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1, JANUARY: 1,
-    FEB: 2, FEBRUARY: 2,
-    MAR: 3, MARCH: 3,
-    APR: 4, APRIL: 4,
+    JAN: 1,
+    JANUARY: 1,
+    FEB: 2,
+    FEBRUARY: 2,
+    MAR: 3,
+    MARCH: 3,
+    APR: 4,
+    APRIL: 4,
     MAY: 5,
-    JUN: 6, JUNE: 6,
-    JUL: 7, JULY: 7,
-    AUG: 8, AUGUST: 8,
-    SEP: 9, SEPT: 9, SEPTEMBER: 9,
-    OCT: 10, OCTOBER: 10,
-    NOV: 11, NOVEMBER: 11,
-    DEC: 12, DECEMBER: 12,
+    JUN: 6,
+    JUNE: 6,
+    JUL: 7,
+    JULY: 7,
+    AUG: 8,
+    AUGUST: 8,
+    SEP: 9,
+    SEPT: 9,
+    SEPTEMBER: 9,
+    OCT: 10,
+    OCTOBER: 10,
+    NOV: 11,
+    NOVEMBER: 11,
+    DEC: 12,
+    DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
   const parseMonthFromSheetName = (sheetName: string): string | null => {
-    const s = String(sheetName || "").trim().toUpperCase();
-    
+    const s = String(sheetName || "")
+      .trim()
+      .toUpperCase();
+
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
       const m = Number(yyyymm[2]);
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
-    
-    const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
+
+    const mon = s.match(
+      /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/
+    );
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
     );
     const y2or4 = s.match(/\b(20\d{2}|\d{2})\b/);
     const monthToken = (monthFull?.[1] || mon?.[1]) as string | undefined;
-    
+
     if (monthToken && y2or4) {
       let y = Number(y2or4[1]);
       if (y < 100) y += 2000;
       const m = MONTH_NAME_MAP[monthToken];
       if (m) return `${y}-${pad2(m)}`;
     }
-    
+
     return null;
   };
 
   const AVG_WINDOW: string[] = [
-    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
-    "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
+    "2024-11",
+    "2024-12",
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
   ];
 
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
   const EXCLUDED_DEPARTMENTS = ["C", "CASH", "A"];
 
   const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
-    937, 1039, 1065, 1105, 59, 161
+    937, 1039, 1065, 1105, 59, 161,
   ]);
 
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
   const TOLERANCE = 12;
 
-  // ✅ CORRECTED: Reference date should be october 31, 2025 (end of bonus period)
-  const referenceDate = new Date(Date.UTC(2025, 9, 30)); // 2025-10-31 (UTC)
+  const referenceDate = new Date(Date.UTC(2025, 9, 30));
 
-  // Parse DOJ from various formats
   function parseDOJ(raw: any): Date | null {
-    if (raw == null || raw === '') return null;
-    
-    if (typeof raw === 'number') {
+    if (raw == null || raw === "") return null;
+
+    if (typeof raw === "number") {
       const excelEpoch = Date.UTC(1899, 11, 30);
       return new Date(excelEpoch + raw * 86400000);
     }
-    
-    if (typeof raw === 'string') {
+
+    if (typeof raw === "string") {
       let s = raw.trim();
-      
+
       if (/\d{4}-\d{2}-\d{2}\s+\d/.test(s)) {
         s = s.split(/\s+/)[0];
       }
-      
-      s = s.replace(/[.\/]/g, '-');
+
+      s = s.replace(/[.\/]/g, "-");
 
       const m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
       if (m) {
         let [_, d, mo, y] = m;
-        let year = Number(y.length === 2 ? (Number(y) <= 29 ? '20' + y : '19' + y) : y);
+        let year = Number(
+          y.length === 2 ? (Number(y) <= 29 ? "20" + y : "19" + y) : y
+        );
         let month = Number(mo) - 1;
         let day = Number(d);
         const dt = new Date(Date.UTC(year, month, day));
@@ -308,15 +397,14 @@ useEffect(() => {
       }
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-        const dt = new Date(s + 'T00:00:00Z');
+        const dt = new Date(s + "T00:00:00Z");
         return isNaN(dt.getTime()) ? null : dt;
       }
     }
-    
+
     return null;
   }
 
-  // ✅ CORRECTED: Proper month calculation that handles all edge cases
   function monthsBetween(start: Date, end: Date): number {
     const sy = start.getUTCFullYear();
     const sm = start.getUTCMonth();
@@ -324,33 +412,39 @@ useEffect(() => {
     const ey = end.getUTCFullYear();
     const em = end.getUTCMonth();
     const ed = end.getUTCDate();
-    
-    // Calculate raw month difference
+
     let months = (ey - sy) * 12 + (em - sm);
-    
-    // Adjust for incomplete months
-    // If the day of end date is before the day of start date, subtract 1 month
+
     if (ed < sd) {
       months -= 1;
     }
-    
+
     return Math.max(0, months);
   }
 
   const calculateMonthsOfService = (dateOfJoining: any): number => {
     const doj = parseDOJ(dateOfJoining);
     if (!doj) return 0;
-    
+
     const months = monthsBetween(doj, referenceDate);
-    
-    // Debug logging
-    console.log(`DOJ: ${doj.toISOString().split('T')[0]} → MOS: ${months} months (as of ${referenceDate.toISOString().split('T')[0]})`);
-    
+
+    console.log(
+      `DOJ: ${doj.toISOString().split("T")[0]} → MOS: ${months} months (as of ${
+        referenceDate.toISOString().split("T")[0]
+      })`
+    );
+
     return months;
   };
 
   const processFiles = async () => {
-    if (!staffFile || !workerFile || !bonusFile || !actualPercentageFile || !dueVoucherFile) {
+    if (
+      !staffFile ||
+      !workerFile ||
+      !bonusFile ||
+      !actualPercentageFile ||
+      !dueVoucherFile
+    ) {
       setError("All five files are required for processing");
       return;
     }
@@ -360,12 +454,15 @@ useEffect(() => {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 6: Unpaid Verification)");
+      console.log("📊 STEP 6: Unpaid Verification (with 0 vs Blank handling)");
       console.log("=".repeat(60));
-      console.log(`✅ CORRECTED Reference Date: ${referenceDate.toISOString().split('T')[0]} (Sep 30, 2025)`);
+      console.log(
+        `✅ Reference Date: ${
+          referenceDate.toISOString().split("T")[0]
+        } (Oct 30, 2025)`
+      );
       console.log(`Bonus Period: November 2024 - September 2025`);
 
-      // ========== LOAD ACTUAL PERCENTAGE DATA ==========
       const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
       const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
       const actualPercentageSheet =
@@ -408,20 +505,29 @@ useEffect(() => {
             const empCode = Number(row[empCodeIdx]);
             const percentage = Number(row[percentageIdx]);
 
-            if (empCode && !isNaN(empCode) && percentage === SPECIAL_PERCENTAGE) {
+            if (
+              empCode &&
+              !isNaN(empCode) &&
+              percentage === SPECIAL_PERCENTAGE
+            ) {
               specialPercentageEmployees.add(empCode);
             }
           }
         }
       }
 
-      console.log(`✅ Special percentage employees: ${specialPercentageEmployees.size}`);
+      console.log(
+        `✅ Special percentage employees: ${specialPercentageEmployees.size}`
+      );
 
-      // ========== LOAD DUE VOUCHER DATA ==========
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
       const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
-      const dueVoucherSheet = dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
-      const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(dueVoucherSheet, { header: 1 });
+      const dueVoucherSheet =
+        dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
+      const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(
+        dueVoucherSheet,
+        { header: 1 }
+      );
 
       const dueVCMap: Map<number, number> = new Map();
       let dueVCHeaderRow = -1;
@@ -465,21 +571,26 @@ useEffect(() => {
 
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
 
-      // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
       const hrUnpaidData: Map<
-        number, 
-        { unpaidHR: number; registerHR: number; dept: string; occurrences: number }
+        number,
+        {
+          unpaidHR: number;
+          registerHR: number;
+          dept: string;
+          occurrences: number;
+        }
       > = new Map();
 
-      // Process Worker sheet (1st sheet)
       if (bonusWorkbook.SheetNames.length > 0) {
         const workerSheetName = bonusWorkbook.SheetNames[0];
         console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
         const workerSheet = bonusWorkbook.Sheets[workerSheetName];
-        const workerData: any[][] = XLSX.utils.sheet_to_json(workerSheet, { header: 1 });
+        const workerData: any[][] = XLSX.utils.sheet_to_json(workerSheet, {
+          header: 1,
+        });
 
         let workerHeaderRow = -1;
         for (let i = 0; i < Math.min(10, workerData.length); i++) {
@@ -500,15 +611,15 @@ useEffect(() => {
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
-          const registerIdx = 18; // Column S
-          
+          const registerIdx = 18;
+
           let dueVCIdx = headers.findIndex((h: any) => {
             const headerStr = String(h ?? "").trim();
             return /DUE\s*VC|DUEVC/i.test(headerStr);
           });
-          
+
           if (dueVCIdx === -1) {
-            dueVCIdx = 19; // Column T
+            dueVCIdx = 19;
           }
 
           for (let i = workerHeaderRow + 1; i < workerData.length; i++) {
@@ -526,7 +637,15 @@ useEffect(() => {
                 existing.unpaidHR += unpaidHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(
+                    2
+                  )}, Unpaid: ₹${unpaidHR.toFixed(
+                    2
+                  )}, Total Register: ₹${existing.registerHR.toFixed(
+                    2
+                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${
+                    existing.occurrences
+                  } occurrences)`
                 );
               } else {
                 hrUnpaidData.set(empCode, {
@@ -541,12 +660,13 @@ useEffect(() => {
         }
       }
 
-      // Process Staff sheet (2nd sheet)
       if (bonusWorkbook.SheetNames.length > 1) {
         const staffSheetName = bonusWorkbook.SheetNames[1];
         console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
         const staffSheet = bonusWorkbook.Sheets[staffSheetName];
-        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, { header: 1 });
+        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, {
+          header: 1,
+        });
 
         let staffHeaderRow = -1;
         for (let i = 0; i < Math.min(10, staffData.length); i++) {
@@ -567,8 +687,8 @@ useEffect(() => {
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
-          const registerIdx = 19; // Column T
-          const unpaidIdx = 21; // Column V
+          const registerIdx = 19;
+          const unpaidIdx = 21;
 
           for (let i = staffHeaderRow + 1; i < staffData.length; i++) {
             const row = staffData[i];
@@ -585,7 +705,15 @@ useEffect(() => {
                 existing.unpaidHR += unpaidHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(2)}, Unpaid: ₹${unpaidHR.toFixed(2)}, Total Register: ₹${existing.registerHR.toFixed(2)}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(
+                    2
+                  )}, Unpaid: ₹${unpaidHR.toFixed(
+                    2
+                  )}, Total Register: ₹${existing.registerHR.toFixed(
+                    2
+                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${
+                    existing.occurrences
+                  } occurrences)`
                 );
               } else {
                 hrUnpaidData.set(empCode, {
@@ -602,31 +730,36 @@ useEffect(() => {
 
       console.log(`✅ HR Unpaid data loaded: ${hrUnpaidData.size} employees`);
 
-      // ========== COMPUTE GROSS SALARY (EXACT STEP-5 LOGIC WITH OCTOBER ESTIMATION) ==========
-      
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
-      
+
       const staffEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+        {
+          name: string;
+          dept: string;
+          months: Map<string, { hasValue: boolean; value: number }>;
+          dateOfJoining: any;
+        }
       > = new Map();
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Staff: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Staff: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -661,13 +794,25 @@ useEffect(() => {
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+            headerStr
+          );
         });
 
         if (dojIdx === -1) {
-          for (let i = Math.max(0, headers.length - 3); i < headers.length; i++) {
-            const h = String(headers[i] ?? "").trim().toLowerCase();
-            if (h.includes("date") || h.includes("joining") || h.includes("doj")) {
+          for (
+            let i = Math.max(0, headers.length - 3);
+            i < headers.length;
+            i++
+          ) {
+            const h = String(headers[i] ?? "")
+              .trim()
+              .toLowerCase();
+            if (
+              h.includes("date") ||
+              h.includes("joining") ||
+              h.includes("doj")
+            ) {
               dojIdx = i;
               break;
             }
@@ -685,9 +830,14 @@ useEffect(() => {
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
-          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
+          
+          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
+          const salary1Result = getCellValue(row[salary1Idx]);
+          
+          const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -701,7 +851,21 @@ useEffect(() => {
           }
 
           const emp = staffEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // 🎯 NEW: Store the cell data with hasValue flag
+          const existing = emp.months.get(monthKey);
+          if (existing) {
+            // If we already have data for this month, add to it
+            if (salary1Result.hasValue) {
+              emp.months.set(monthKey, {
+                hasValue: true,
+                value: existing.value + salary1Result.value,
+              });
+            }
+          } else {
+            // First time seeing this month for this employee
+            emp.months.set(monthKey, salary1Result);
+          }
         }
       }
 
@@ -709,27 +873,34 @@ useEffect(() => {
 
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
-      
+
       const workerEmployees: Map<
         number,
-        { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+        {
+          name: string;
+          dept: string;
+          months: Map<string, { hasValue: boolean; value: number }>;
+          dateOfJoining: any;
+        }
       > = new Map();
 
       for (let sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Worker: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Worker: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -750,17 +921,23 @@ useEffect(() => {
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-        
+
         const deptIdx = headers.findIndex((h: any) => {
           const normalized = norm(h);
-          return normalized === "DEPT" || normalized === "DEPARTMENT" || normalized === "DEPTT";
+          return (
+            normalized === "DEPT" ||
+            normalized === "DEPARTMENT" ||
+            normalized === "DEPTT"
+          );
         });
-        
-        const salary1Idx = 8; // Column I
+
+        const salary1Idx = 8;
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(headerStr);
+          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+            headerStr
+          );
         });
 
         if (dojIdx === -1 && headers.length > 15) {
@@ -774,12 +951,19 @@ useEffect(() => {
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
-          const salary1 = Number(row[salary1Idx]) || 0;
-          const doj = (dojIdx !== -1 && row.length > dojIdx) ? row[dojIdx] : null;
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
+          
+          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
+          const salary1Result = getCellValue(row[salary1Idx]);
+          
+          const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (deptIdx !== -1) {
-            const dept = String(row[deptIdx] || "").trim().toUpperCase();
+            const dept = String(row[deptIdx] || "")
+              .trim()
+              .toUpperCase();
             if (EXCLUDED_DEPARTMENTS.includes(dept)) {
               continue;
             }
@@ -797,49 +981,77 @@ useEffect(() => {
           }
 
           const emp = workerEmployees.get(empId)!;
-          emp.months.set(monthKey, (emp.months.get(monthKey) || 0) + salary1);
+          
+          // 🎯 NEW: Store the cell data with hasValue flag
+          const existing = emp.months.get(monthKey);
+          if (existing) {
+            // If we already have data for this month, add to it
+            if (salary1Result.hasValue) {
+              emp.months.set(monthKey, {
+                hasValue: true,
+                value: existing.value + salary1Result.value,
+              });
+            }
+          } else {
+            // First time seeing this month for this employee
+            emp.months.set(monthKey, salary1Result);
+          }
         }
       }
 
       console.log(`✅ Worker employees: ${workerEmployees.size}`);
 
-      // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION ==========
       const employeeData: Map<
         number,
         { name: string; dept: string; grossSalary: number; dateOfJoining: any }
       > = new Map();
 
+      // 🎯 NEW: Updated folding logic to handle hasValue flag
       const foldMonthly = (
         src: Map<
           number,
-          { name: string; dept: string; months: Map<string, number>; dateOfJoining: any }
+          {
+            name: string;
+            dept: string;
+            months: Map<string, { hasValue: boolean; value: number }>;
+            dateOfJoining: any;
+          }
         >
       ) => {
         for (const [empId, rec] of src) {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
-          
+
+          // 🎯 NEW: Only include months where hasValue is true
           for (const mk of AVG_WINDOW) {
-            const v = rec.months.get(mk);
-            if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
-              baseSum += Number(v);
-              monthsIncluded.push({ month: mk, value: Number(v) });
+            const cellData = rec.months.get(mk);
+            if (cellData && cellData.hasValue) {
+              baseSum += cellData.value;
+              monthsIncluded.push({ month: mk, value: cellData.value });
             }
           }
 
           let estOct = 0;
           let total = baseSum;
-          const hasSep2025 = rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
+          
+          const sepData = rec.months.get("2025-09");
+          const hasSep2025 = sepData && sepData.hasValue && sepData.value > 0;
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
 
           if (isExcluded) {
             console.log(
-              `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
+              `🚫 EMP ${empId} (${
+                rec.name
+              }): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
-            const values = monthsIncluded.map(m => m.value);
+            const values = monthsIncluded.map((m) => m.value);
             estOct = values.reduce((a, b) => a + b, 0) / values.length;
             total = baseSum + estOct;
+            
+            console.log(
+              `📊 EMP ${empId} (${rec.name}): Avg from ${monthsIncluded.length} months with values = ₹${estOct.toFixed(2)}, Total = ₹${total.toFixed(2)}`
+            );
           }
 
           if (!employeeData.has(empId)) {
@@ -860,7 +1072,6 @@ useEffect(() => {
 
       console.log(`✅ Employee data loaded: ${employeeData.size} employees`);
 
-      // ========== CALCULATE UNPAID WITH CORRECTED MOS ==========
       const comparison: any[] = [];
 
       for (const [empId, empData] of employeeData) {
@@ -892,8 +1103,12 @@ useEffect(() => {
         let status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
         let validationError = "";
-        if (!isEligible && Math.abs(unpaidSoftware - registerSoftware) > TOLERANCE) {
-          validationError = "Employee is not eligible, so their Unpaid value must be equal to the Register.";
+        if (
+          !isEligible &&
+          Math.abs(unpaidSoftware - registerSoftware) > TOLERANCE
+        ) {
+          validationError =
+            "Employee is not eligible, so their Unpaid value must be equal to the Register.";
           status = "Error";
         }
 
@@ -919,10 +1134,6 @@ useEffect(() => {
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
-
-
-     
-
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -932,15 +1143,23 @@ useEffect(() => {
   };
 
   useEffect(() => {
-    if (staffFile && workerFile && bonusFile && actualPercentageFile && dueVoucherFile) {
+    if (
+      staffFile &&
+      workerFile &&
+      bonusFile &&
+      actualPercentageFile &&
+      dueVoucherFile
+    ) {
       processFiles();
     }
     // eslint-disable-next-line
   }, [staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile]);
 
+  // Sorting logic with filter integration
   useEffect(() => {
-    let filtered = comparisonData;
+    let filtered = [...comparisonData];
 
+    // Apply filters
     if (departmentFilter !== "All") {
       filtered = filtered.filter((row) => row.department === departmentFilter);
     }
@@ -953,8 +1172,77 @@ useEffect(() => {
       }
     }
 
+    // Apply sorting
+    if (sortConfig.key && sortConfig.direction) {
+      filtered.sort((a, b) => {
+        const aValue = a[sortConfig.key!];
+        const bValue = b[sortConfig.key!];
+
+        // Handle different data types
+        let comparison = 0;
+        if (typeof aValue === "number" && typeof bValue === "number") {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === "string" && typeof bValue === "string") {
+          comparison = aValue.localeCompare(bValue);
+        } else if (typeof aValue === "boolean" && typeof bValue === "boolean") {
+          comparison = aValue === bValue ? 0 : aValue ? 1 : -1;
+        }
+
+        return sortConfig.direction === "asc" ? comparison : -comparison;
+      });
+    }
+
     setFilteredData(filtered);
-  }, [departmentFilter, eligibilityFilter, comparisonData]);
+  }, [departmentFilter, eligibilityFilter, comparisonData, sortConfig]);
+
+  // Handle column sorting
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" = "asc";
+    
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === "asc") {
+        direction = "desc";
+      } else if (sortConfig.direction === "desc") {
+        // Reset sorting
+        setSortConfig({ key: null, direction: null });
+        return;
+      }
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  // Sort icon component
+  const SortIcon = ({ columnKey }: { columnKey: string }) => {
+    const isActive = sortConfig.key === columnKey;
+    
+    return (
+      <div className="inline-flex flex-col ml-1">
+        <svg
+          className={`w-3 h-3 ${
+            isActive && sortConfig.direction === "asc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M5 10l5-5 5 5H5z" />
+        </svg>
+        <svg
+          className={`w-3 h-3 -mt-1 ${
+            isActive && sortConfig.direction === "desc"
+              ? "text-blue-600"
+              : "text-gray-400"
+          }`}
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
+          <path d="M15 10l-5 5-5-5h10z" />
+        </svg>
+      </div>
+    );
+  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -965,9 +1253,10 @@ useEffect(() => {
   };
 
   const exportToExcel = () => {
-    const dataToExport = departmentFilter === "All" && eligibilityFilter === "All"
-      ? comparisonData
-      : filteredData;
+    const dataToExport =
+      departmentFilter === "All" && eligibilityFilter === "All"
+        ? comparisonData
+        : filteredData;
 
     const ws = XLSX.utils.json_to_sheet(
       dataToExport.map((row) => ({
@@ -975,7 +1264,7 @@ useEffect(() => {
         "Employee Name": row.employeeName,
         Department: row.department,
         "Months of Service": row.monthsOfService,
-        "Eligible": row.isEligible ? "YES" : "NO",
+        Eligible: row.isEligible ? "YES" : "NO",
         "Percentage (%)": row.percentage,
         "Gross Salary (Software)": row.grossSalarySoftware,
         "Register (Software)": row.registerSoftware,
@@ -991,7 +1280,10 @@ useEffect(() => {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Unpaid Verification");
-    XLSX.writeFile(wb, `Step6-Unpaid-Verification-CORRECTED-${departmentFilter}-${eligibilityFilter}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `Step6-Unpaid-Verification-CORRECTED-${departmentFilter}-${eligibilityFilter}.xlsx`
+    );
   };
 
   const FileCard = ({
@@ -1066,7 +1358,14 @@ useEffect(() => {
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
-            
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">
+                Step 6 - Unpaid Verification
+              </h1>
+              <p className="text-sm text-gray-600 mt-2">
+                ✅ Now handles 0 vs blank cells correctly in averaging
+              </p>
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => router.push("/step5")}
@@ -1088,8 +1387,6 @@ useEffect(() => {
               </button>
             </div>
           </div>
-
-          
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
@@ -1119,9 +1416,13 @@ useEffect(() => {
             />
           </div>
 
-          {[staffFile, workerFile, bonusFile, actualPercentageFile, dueVoucherFile].filter(
-            Boolean
-          ).length < 5 && (
+          {[
+            staffFile,
+            workerFile,
+            bonusFile,
+            actualPercentageFile,
+            dueVoucherFile,
+          ].filter(Boolean).length < 5 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <svg
@@ -1154,7 +1455,7 @@ useEffect(() => {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing with corrected MOS calculation (Sep 30, 2025)...
+                  Processing with 0 vs blank handling...
                 </p>
               </div>
             </div>
@@ -1186,7 +1487,7 @@ useEffect(() => {
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-bold text-gray-800">
-                    Unpaid Verification Results (CORRECTED MOS)
+                    Unpaid Verification Results
                   </h2>
                   <select
                     value={departmentFilter}
@@ -1232,47 +1533,122 @@ useEffect(() => {
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 px-3 py-2 text-left">
-                        Emp ID
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("employeeId")}
+                      >
+                        <div className="flex items-center">
+                          Emp ID
+                          <SortIcon columnKey="employeeId" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-left">
-                        Name
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("employeeName")}
+                      >
+                        <div className="flex items-center">
+                          Name
+                          <SortIcon columnKey="employeeName" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-left">
-                        Dept
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("department")}
+                      >
+                        <div className="flex items-center">
+                          Dept
+                          <SortIcon columnKey="department" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        MOS
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("monthsOfService")}
+                      >
+                        <div className="flex items-center justify-center">
+                          MOS
+                          <SortIcon columnKey="monthsOfService" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        Eligible
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("isEligible")}
+                      >
+                        <div className="flex items-center justify-center">
+                          Eligible
+                          <SortIcon columnKey="isEligible" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        %
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("percentage")}
+                      >
+                        <div className="flex items-center justify-center">
+                          %
+                          <SortIcon columnKey="percentage" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Gross (SW)
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("grossSalarySoftware")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Gross (SW)
+                          <SortIcon columnKey="grossSalarySoftware" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Register (SW)
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("registerSoftware")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Register (SW)
+                          <SortIcon columnKey="registerSoftware" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Register (HR)
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("registerHR")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Register (HR)
+                          <SortIcon columnKey="registerHR" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        HR Entries
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("unpaidSoftware")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Unpaid (SW)
+                          <SortIcon columnKey="unpaidSoftware" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Unpaid (SW)
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("unpaidHR")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Unpaid (HR)
+                          <SortIcon columnKey="unpaidHR" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Unpaid (HR)
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("difference")}
+                      >
+                        <div className="flex items-center justify-end">
+                          Diff
+                          <SortIcon columnKey="difference" />
+                        </div>
                       </th>
-                      <th className="border border-gray-300 px-3 py-2 text-right">
-                        Diff
-                      </th>
-                      <th className="border border-gray-300 px-3 py-2 text-center">
-                        Status
+                      <th 
+                        className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                        onClick={() => handleSort("status")}
+                      >
+                        <div className="flex items-center justify-center">
+                          Status
+                          <SortIcon columnKey="status" />
+                        </div>
                       </th>
                     </tr>
                   </thead>
@@ -1284,13 +1660,10 @@ useEffect(() => {
                           idx % 2 === 0 ? "bg-white" : "bg-gray-50"
                         } ${row.validationError ? "bg-red-50" : ""} ${
                           row.hrOccurrences > 1 ? "bg-yellow-50" : ""
-                        } ${row.employeeId === 922 ? "bg-green-100 font-bold" : ""}`}
+                        }`}
                       >
                         <td className="border border-gray-300 px-3 py-2">
                           {row.employeeId}
-                          {row.employeeId === 922 && (
-                            <span className="ml-1 text-xs text-green-700">✅</span>
-                          )}
                         </td>
                         <td className="border border-gray-300 px-3 py-2">
                           {row.employeeName}
@@ -1340,17 +1713,6 @@ useEffect(() => {
                         <td className="border border-gray-300 px-3 py-2 text-right">
                           {formatCurrency(row.registerHR)}
                         </td>
-                        <td className="border border-gray-300 px-3 py-2 text-center">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              row.hrOccurrences > 1
-                                ? "bg-orange-100 text-orange-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {row.hrOccurrences}
-                          </span>
-                        </td>
                         <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
                           {formatCurrency(row.unpaidSoftware)}
                         </td>
@@ -1396,7 +1758,9 @@ useEffect(() => {
                       .filter((r) => r.validationError)
                       .map((row) => (
                         <p key={row.employeeId}>
-                          <strong>Emp {row.employeeId} ({row.employeeName}):</strong>{" "}
+                          <strong>
+                            Emp {row.employeeId} ({row.employeeName}):
+                          </strong>{" "}
                           {row.validationError}
                         </p>
                       ))}
@@ -1412,8 +1776,7 @@ useEffect(() => {
                   {filteredData.filter((r) => r.department === "Worker").length}
                 </div>
                 <div>
-                  Eligible:{" "}
-                  {filteredData.filter((r) => r.isEligible).length} |
+                  Eligible: {filteredData.filter((r) => r.isEligible).length} |
                   Not Eligible:{" "}
                   {filteredData.filter((r) => !r.isEligible).length}
                 </div>

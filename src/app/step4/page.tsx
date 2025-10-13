@@ -254,6 +254,65 @@ useEffect(() => {
   postAuditMessagesStep4(items, batchId).catch(err => console.error('Auto-audit step4 failed', err));
 }, [comparisonData]);
 
+// Add these to the top of your component:
+const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" | null }>({key: '', direction: null});
+
+// Sorting helper (put inside component)
+const handleSort = (key: string) => {
+  let direction: "asc" | "desc" | null = "asc";
+  if (sortConfig.key === key) {
+    direction = sortConfig.direction === "asc" ? "desc" : sortConfig.direction === "desc" ? null : "asc";
+  }
+  setSortConfig({ key, direction });
+};
+
+useEffect(() => {
+  let dataToSort = comparisonData;
+  if (sortConfig.key && sortConfig.direction) {
+    dataToSort = [...dataToSort].sort((a, b) => {
+      let aValue = a[sortConfig.key], bValue = b[sortConfig.key];
+      if (['employeeId', 'percentage', 'grossSal', 'calculatedValue', 'gross2HR', 'difference'].includes(sortConfig.key)) {
+        aValue = Number(aValue) || 0;
+        bValue = Number(bValue) || 0;
+      } else if (sortConfig.key === 'employeeName' || sortConfig.key === 'department' || sortConfig.key === 'status') {
+        aValue = String(aValue || '').toUpperCase();
+        bValue = String(bValue || '').toUpperCase();
+      }
+      if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+  }
+  setFilteredData(dataToSort);
+}, [sortConfig, comparisonData]);
+
+const SortArrows = ({columnKey}: {columnKey: string}) => {
+  const isActive = sortConfig.key === columnKey;
+  return (
+    <div className="inline-flex flex-col ml-1">
+      <button
+        type="button"
+        className={`leading-none ${isActive && sortConfig.direction === 'asc' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+        onClick={() => handleSort(columnKey)}
+        tabIndex={-1}
+        title="Sort Ascending"
+      >
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5z" /></svg>
+      </button>
+      <button
+        type="button"
+        className={`leading-none -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+        onClick={() => handleSort(columnKey)}
+        tabIndex={-1}
+        title="Sort Descending"
+      >
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z" /></svg>
+      </button>
+    </div>
+  );
+};
+
+
 
 
   // **CORRECTED PERCENTAGE CALCULATION** - Calculate based on current date (Oct 12, 2025)
@@ -1005,11 +1064,7 @@ useEffect(() => {
               <h1 className="text-3xl font-bold text-gray-800">
                 Step 4 - Staff Bonus Calculation
               </h1>
-              <p className="text-gray-600 mt-2">
-                Calculate staff bonuses using the formula: IF(percentage=8.33,
-                GROSS SAL., IF(percentage&gt;8.33, GROSS SAL.*0.6, GROSS
-                SAL.*0.6))
-              </p>
+              
             </div>
             <div className="flex gap-3">
               <button
@@ -1079,7 +1134,7 @@ useEffect(() => {
                 from bonus file (for duplicate employee IDs)
               </p>
               <p className="text-xs text-blue-600 mt-2">
-                <strong>✅ CORRECTED:</strong> Percentage is calculated based on
+                 Percentage is calculated based on
                 service period as of Oct 12, 2025: &lt;12 months = 10% | 12-23
                 months = 12% | ≥24 months = 8.33%
               </p>
@@ -1221,99 +1276,81 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee ID
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Employee Name
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Department
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-left">
-                        Date of Joining
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        %
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        GROSS SAL. (Software)
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Calculated (GROSS 02)
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        GROSS 02 (HR)
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-right">
-                        Difference
-                      </th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((row, idx) => (
-                      <tr
-                        key={idx}
-                        className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                      >
-                        <td className="border border-gray-300 px-4 py-2">
-                          {row.employeeId}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2">
-                          {row.employeeName}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
-                          <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
-                            {row.department}
-                          </span>
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-sm">
-                          {formatDate(row.dateOfJoining)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right font-medium">
-                          {row.percentage}%
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right">
-                          {formatCurrency(row.grossSal)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right font-medium text-blue-600">
-                          {formatCurrency(row.calculatedValue)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-right font-medium text-purple-600">
-                          {formatCurrency(row.gross2HR)}
-                        </td>
-                        <td
-                          className={`border border-gray-300 px-4 py-2 text-right font-medium ${
-                            Math.abs(row.difference) <= 12
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {formatCurrency(row.difference)}
-                        </td>
-                        <td className="border border-gray-300 px-4 py-2 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-sm font-medium ${
-                              row.status === "Match"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+<div className="border border-gray-300 rounded-lg overflow-hidden">
+  <div className="overflow-x-auto">
+    <div className="max-h-[600px] overflow-y-auto">
+      <table className="w-full border-collapse">
+        <thead className="bg-gray-100 sticky top-0 z-10">
+          <tr>
+            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+              <div className="flex items-center">Employee ID<SortArrows columnKey="employeeId" /></div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+              <div className="flex items-center">Employee Name<SortArrows columnKey="employeeName" /></div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+              <div className="flex items-center">Department<SortArrows columnKey="department" /></div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+              <div className="flex items-center">Date of Joining<SortArrows columnKey="dateOfJoining" /></div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+              <div className="flex items-center justify-end">%
+                <SortArrows columnKey="percentage" />
               </div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+              <div className="flex items-center justify-end">GROSS SAL. (Software)
+                <SortArrows columnKey="grossSal" />
+              </div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+              <div className="flex items-center justify-end">Calculated (GROSS 02)
+                <SortArrows columnKey="calculatedValue" />
+              </div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+              <div className="flex items-center justify-end">GROSS 02 (HR)
+                <SortArrows columnKey="gross2HR" />
+              </div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+              <div className="flex items-center justify-end">Difference
+                <SortArrows columnKey="difference" />
+              </div>
+            </th>
+            <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
+              <div className="flex items-center justify-center">Status<SortArrows columnKey="status" /></div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredData.map((row, idx) => (
+            <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+              <td className="border border-gray-300 px-4 py-2">{row.employeeId}</td>
+              <td className="border border-gray-300 px-4 py-2">{row.employeeName}</td>
+              <td className="border border-gray-300 px-4 py-2 text-center">
+                <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">{row.department}</span>
+              </td>
+              <td className="border border-gray-300 px-4 py-2 text-sm">{formatDate(row.dateOfJoining)}</td>
+              <td className="border border-gray-300 px-4 py-2 text-right font-medium">{row.percentage}%</td>
+              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.grossSal)}</td>
+              <td className="border border-gray-300 px-4 py-2 text-right font-medium text-blue-600">{formatCurrency(row.calculatedValue)}</td>
+              <td className="border border-gray-300 px-4 py-2 text-right font-medium text-purple-600">{formatCurrency(row.gross2HR)}</td>
+              <td className={`border border-gray-300 px-4 py-2 text-right font-medium ${Math.abs(row.difference) <= 12 ? "text-green-600" : "text-red-600"}`}>
+                {formatCurrency(row.difference)}
+              </td>
+              <td className="border border-gray-300 px-4 py-2 text-center">
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${row.status === "Match" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{row.status}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>Total Staff Employees: {filteredData.length}</div>

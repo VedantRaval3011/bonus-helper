@@ -1,1 +1,14 @@
 @import "tailwindcss";
+
+/* Always show horizontal scrollbar */
+::-webkit-scrollbar {
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 4px;
+}
+.overflow-x-auto {
+  scrollbar-width: thin;
+  scrollbar-color: #e5e7eb #fff;
+}
