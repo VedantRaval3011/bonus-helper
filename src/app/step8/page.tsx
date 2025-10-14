@@ -964,7 +964,7 @@ export default function Step8Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 py-5 px-4">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>

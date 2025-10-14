@@ -12,7 +12,6 @@ export default function Step4Page() {
   const [filteredData, setFilteredData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isFormulaMinimized, setIsFormulaMinimized] = useState(true);
 
   type FileSlot = { type: string; file: File | null };
 
@@ -125,204 +124,228 @@ export default function Step4Page() {
   ];
 
   // === Step 4 Audit Helpers ===
-const TOLERANCE = 12; // Step 4 uses ±12 to mark Match vs Mismatch
+  const TOLERANCE = 12; // Step 4 uses ±12 to mark Match vs Mismatch
 
-async function postAuditMessagesStep4(items: any[], batchId?: string) {
-  const bid =
-    batchId ||
-    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2));
-  await fetch('/api/audit/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchId: bid, step: 4, items }),
-  });
-  return bid;
-}
+  async function postAuditMessagesStep4(items: any[], batchId?: string) {
+    const bid =
+      batchId ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: bid, step: 4, items }),
+    });
+    return bid;
+  }
 
-function buildStep4MismatchMessages(rows: any[]) {
-  // rows: [{ employeeId, employeeName, department, percentage, grossSal, calculatedValue, gross2HR, difference, status }]
-  const items: any[] = [];
-  for (const r of rows) {
-    if (r?.status === 'Mismatch') {
-      items.push({
-        level: 'error',
-        tag: 'mismatch',
-        text: `[step4] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
-        scope: 'staff',
-        source: 'step4',
-        meta: {
-          employeeId: r.employeeId,
-          name: r.employeeName,
-          department: r.department,
-          percentage: r.percentage,
-          grossSal: r.grossSal,
-          calculatedValue: r.calculatedValue,
-          gross2HR: r.gross2HR,
-          diff: r.difference,
+  function buildStep4MismatchMessages(rows: any[]) {
+    const items: any[] = [];
+    for (const r of rows) {
+      if (r?.status === "Mismatch") {
+        items.push({
+          level: "error",
+          tag: "mismatch",
+          text: `[step4] ${r.employeeId} ${r.employeeName} diff=${Number(
+            r.difference ?? 0
+          ).toFixed(2)}`,
+          scope: "staff",
+          source: "step4",
+          meta: {
+            employeeId: r.employeeId,
+            name: r.employeeName,
+            department: r.department,
+            percentage: r.percentage,
+            grossSal: r.grossSal,
+            calculatedValue: r.calculatedValue,
+            gross2HR: r.gross2HR,
+            diff: r.difference,
+            tolerance: TOLERANCE,
+          },
+        });
+      }
+    }
+    return items;
+  }
+
+  function buildStep4SummaryMessage(rows: any[]) {
+    const total = rows.length || 0;
+    const mismatches = rows.filter((r) => r.status === "Mismatch").length;
+    const matches = total - mismatches;
+
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const grossSalSum = sum(rows.map((r) => Number(r.grossSal || 0)));
+    const calcSum = sum(rows.map((r) => Number(r.calculatedValue || 0)));
+    const hrSum = sum(rows.map((r) => Number(r.gross2HR || 0)));
+
+    return {
+      level: "info",
+      tag: "summary",
+      text: `Step4 run: total=${total} match=${matches} mismatch=${mismatches}`,
+      scope: "staff",
+      source: "step4",
+      meta: {
+        totals: {
+          total,
+          matches,
+          mismatches,
           tolerance: TOLERANCE,
+          grossSalSum,
+          calculatedSum: calcSum,
+          hrGross2Sum: hrSum,
         },
+      },
+    };
+  }
+
+  async function handleSaveAuditStep4(rows: any[]) {
+    if (!rows || rows.length === 0) return;
+    const items = [
+      buildStep4SummaryMessage(rows),
+      ...buildStep4MismatchMessages(rows),
+    ];
+    if (items.length === 0) return;
+    await postAuditMessagesStep4(items);
+  }
+
+  // Stable hash for a run signature
+  function djb2Hash(str: string) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  }
+
+  function buildRunKeyStep4(rows: any[]) {
+    const sig = rows
+      .map(
+        (r) =>
+          `${r.employeeId}|${r.department}|${Number(r.grossSal) || 0}|${
+            Number(r.calculatedValue) || 0
+          }|${Number(r.gross2HR) || 0}|${Number(r.difference) || 0}|${r.status}`
+      )
+      .join(";");
+    return djb2Hash(sig);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+    const runKey = buildRunKeyStep4(comparisonData);
+    const markerKey = `audit_step4_${runKey}`;
+
+    if (sessionStorage.getItem(markerKey)) return;
+
+    sessionStorage.setItem(markerKey, "1");
+    const deterministicBatchId = `step4-${runKey}`;
+
+    const items = [
+      buildStep4SummaryMessage(comparisonData),
+      ...buildStep4MismatchMessages(comparisonData),
+    ];
+
+    postAuditMessagesStep4(items, deterministicBatchId).catch((err) => {
+      console.error("Auto-audit step4 failed", err);
+      sessionStorage.removeItem(markerKey);
+    });
+  }, [comparisonData]);
+
+  const [sortConfig, setSortConfig] = useState<{
+    key: string;
+    direction: "asc" | "desc" | null;
+  }>({ key: "", direction: null });
+
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" | null = "asc";
+    if (sortConfig.key === key) {
+      direction =
+        sortConfig.direction === "asc"
+          ? "desc"
+          : sortConfig.direction === "desc"
+          ? null
+          : "asc";
+    }
+    setSortConfig({ key, direction });
+  };
+
+  useEffect(() => {
+    let dataToSort = comparisonData;
+    if (sortConfig.key && sortConfig.direction) {
+      dataToSort = [...dataToSort].sort((a, b) => {
+        let aValue = a[sortConfig.key],
+          bValue = b[sortConfig.key];
+        if (
+          [
+            "employeeId",
+            "percentage",
+            "grossSal",
+            "calculatedValue",
+            "gross2HR",
+            "difference",
+          ].includes(sortConfig.key)
+        ) {
+          aValue = Number(aValue) || 0;
+          bValue = Number(bValue) || 0;
+        } else if (
+          sortConfig.key === "employeeName" ||
+          sortConfig.key === "department" ||
+          sortConfig.key === "status"
+        ) {
+          aValue = String(aValue || "").toUpperCase();
+          bValue = String(bValue || "").toUpperCase();
+        }
+        if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
       });
     }
-  }
-  return items;
-}
+    setFilteredData(dataToSort);
+  }, [sortConfig, comparisonData]);
 
-function buildStep4SummaryMessage(rows: any[]) {
-  const total = rows.length || 0;
-  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
-  const matches = total - mismatches;
-
-  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  const grossSalSum = sum(rows.map((r) => Number(r.grossSal || 0)));
-  const calcSum = sum(rows.map((r) => Number(r.calculatedValue || 0)));
-  const hrSum = sum(rows.map((r) => Number(r.gross2HR || 0)));
-
-  return {
-    level: 'info',
-    tag: 'summary',
-    text: `Step4 run: total=${total} match=${matches} mismatch=${mismatches}`,
-    scope: 'staff',
-    source: 'step4',
-    meta: {
-      totals: {
-        total,
-        matches,
-        mismatches,
-        tolerance: TOLERANCE,
-        grossSalSum,
-        calculatedSum: calcSum,
-        hrGross2Sum: hrSum,
-      },
-    },
+  const SortArrows = ({ columnKey }: { columnKey: string }) => {
+    const isActive = sortConfig.key === columnKey;
+    return (
+      <div className="inline-flex flex-col ml-1">
+        <button
+          type="button"
+          className={`leading-none ${
+            isActive && sortConfig.direction === "asc"
+              ? "text-indigo-600"
+              : "text-gray-400 hover:text-gray-600"
+          }`}
+          onClick={() => handleSort(columnKey)}
+          tabIndex={-1}
+          title="Sort Ascending"
+        >
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M7 14l5-5 5 5z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={`leading-none -mt-1 ${
+            isActive && sortConfig.direction === "desc"
+              ? "text-indigo-600"
+              : "text-gray-400 hover:text-gray-600"
+          }`}
+          onClick={() => handleSort(columnKey)}
+          tabIndex={-1}
+          title="Sort Descending"
+        >
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M7 10l5 5 5-5z" />
+          </svg>
+        </button>
+      </div>
+    );
   };
-}
 
-async function handleSaveAuditStep4(rows: any[]) {
-  if (!rows || rows.length === 0) return;
-  const items = [buildStep4SummaryMessage(rows), ...buildStep4MismatchMessages(rows)];
-  if (items.length === 0) return;
-  await postAuditMessagesStep4(items);
-}
-
-// inside Step4Page component
-
-// Stable hash for a run signature
-function djb2Hash(str: string) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
-  return (h >>> 0).toString(36);
-}
-
-function buildRunKeyStep4(rows: any[]) {
-  // Signature capturing the fields that define Step 4 outputs
-  const sig = rows
-    .map(r =>
-      `${r.employeeId}|${r.department}|${Number(r.grossSal)||0}|${Number(r.calculatedValue)||0}|${Number(r.gross2HR)||0}|${Number(r.difference)||0}|${r.status}`
-    )
-    .join(';');
-  return djb2Hash(sig);
-}
-
-useEffect(() => {
-  if (typeof window === 'undefined') return; // SSR guard
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const runKey = buildRunKeyStep4(comparisonData);
-  const markerKey = `audit_step4_${runKey}`;
-
-  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
-
-  sessionStorage.setItem(markerKey, '1');
-  const deterministicBatchId = `step4-${runKey}`;
-
-  const items = [buildStep4SummaryMessage(comparisonData), ...buildStep4MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep4(items, deterministicBatchId).catch(err => {
-    console.error('Auto-audit step4 failed', err);
-    sessionStorage.removeItem(markerKey); // allow retry on next refresh if it failed
-  });
-}, [comparisonData]);
-
-useEffect(() => {
-  if (typeof window === 'undefined') return;
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
-
-  const batchId = `step4-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const items = [buildStep4SummaryMessage(comparisonData), ...buildStep4MismatchMessages(comparisonData)];
-
-  postAuditMessagesStep4(items, batchId).catch(err => console.error('Auto-audit step4 failed', err));
-}, [comparisonData]);
-
-// Add these to the top of your component:
-const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" | null }>({key: '', direction: null});
-
-// Sorting helper (put inside component)
-const handleSort = (key: string) => {
-  let direction: "asc" | "desc" | null = "asc";
-  if (sortConfig.key === key) {
-    direction = sortConfig.direction === "asc" ? "desc" : sortConfig.direction === "desc" ? null : "asc";
-  }
-  setSortConfig({ key, direction });
-};
-
-useEffect(() => {
-  let dataToSort = comparisonData;
-  if (sortConfig.key && sortConfig.direction) {
-    dataToSort = [...dataToSort].sort((a, b) => {
-      let aValue = a[sortConfig.key], bValue = b[sortConfig.key];
-      if (['employeeId', 'percentage', 'grossSal', 'calculatedValue', 'gross2HR', 'difference'].includes(sortConfig.key)) {
-        aValue = Number(aValue) || 0;
-        bValue = Number(bValue) || 0;
-      } else if (sortConfig.key === 'employeeName' || sortConfig.key === 'department' || sortConfig.key === 'status') {
-        aValue = String(aValue || '').toUpperCase();
-        bValue = String(bValue || '').toUpperCase();
-      }
-      if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
-    });
-  }
-  setFilteredData(dataToSort);
-}, [sortConfig, comparisonData]);
-
-const SortArrows = ({columnKey}: {columnKey: string}) => {
-  const isActive = sortConfig.key === columnKey;
-  return (
-    <div className="inline-flex flex-col ml-1">
-      <button
-        type="button"
-        className={`leading-none ${isActive && sortConfig.direction === 'asc' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-        onClick={() => handleSort(columnKey)}
-        tabIndex={-1}
-        title="Sort Ascending"
-      >
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5z" /></svg>
-      </button>
-      <button
-        type="button"
-        className={`leading-none -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
-        onClick={() => handleSort(columnKey)}
-        tabIndex={-1}
-        title="Sort Descending"
-      >
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z" /></svg>
-      </button>
-    </div>
-  );
-};
-
-
-
-
-  // **CORRECTED PERCENTAGE CALCULATION** - Calculate based on current date (Oct 12, 2025)
   const calculatePercentage = (dateOfJoining: any): number => {
     if (!dateOfJoining) return 0;
 
     let doj: Date;
 
-    // Handle Excel serial date number
     if (typeof dateOfJoining === "number") {
       const excelEpoch = new Date(1899, 11, 30);
       doj = new Date(excelEpoch.getTime() + dateOfJoining * 86400000);
@@ -330,22 +353,16 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
       doj = new Date(dateOfJoining);
     }
 
-    // Check if date is valid
     if (isNaN(doj.getTime())) return 0;
 
-    // Calculate to 30th Oct 2025
-    const referenceDate = new Date(2025, 8, 30); // FIXED: Month is 0-indexed, so 9 = October
+    const referenceDate = new Date(2025, 8, 30);
 
-    // Calculate the difference in years and months
     const yearsDiff = referenceDate.getFullYear() - doj.getFullYear();
     const monthsDiff = referenceDate.getMonth() - doj.getMonth();
     const daysDiff = referenceDate.getDate() - doj.getDate();
 
-    // Calculate total months
     let totalMonths = yearsDiff * 12 + monthsDiff;
 
-    // If the day of the reference date is before the day of joining,
-    // subtract one month because a full month hasn't been completed yet
     if (daysDiff < 0) {
       totalMonths--;
     }
@@ -354,26 +371,21 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
       `DOJ: ${doj.toLocaleDateString()}, Reference: ${referenceDate.toLocaleDateString()}, Total Months: ${totalMonths}`
     );
 
-    // Apply percentage rules based on months of service
     if (totalMonths < 12) {
-      return 10; // Less than 1 year → 10%
+      return 10;
     } else if (totalMonths >= 12 && totalMonths < 24) {
-      return 12; // 1 year to less than 2 years → 12%
+      return 12;
     } else {
-      return 8.33; // 2 years or more → 8.33%
+      return 8.33;
     }
   };
 
-  // *CORRECTED FORMULA*: =IF(X=8.33, Q, IF(X>8.33, Q*0.6, ""))
-  // Where X = percentage, Q = Gross SAL. (our gross2Software)
   const applyBonusFormula = (grossSal: number, percentage: number): number => {
     if (percentage === 8.33) {
       return grossSal;
     } else if (percentage > 8.33) {
-      // This applies to 10% and 12% cases
       return grossSal * 0.6;
     } else {
-      // For percentage < 8.33, Excel returns "" (empty), we'll return 0
       return 0;
     }
   };
@@ -388,7 +400,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     setError(null);
 
     try {
-      // ========== STEP 0: Read Actual Percentage file and get Average sheet employee IDs ==========
       let employeesToIgnoreOctober = new Set<number>();
 
       if (actualPercentageFile) {
@@ -397,7 +408,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
           const actualBuffer = await actualPercentageFile.arrayBuffer();
           const actualWorkbook = XLSX.read(actualBuffer);
 
-          // Read the Average sheet to get employee IDs to ignore
           const averageSheetName = actualWorkbook.SheetNames.find(
             (name) => name.toLowerCase() === "average"
           );
@@ -412,7 +422,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
               }
             );
 
-            // Find header row in Average sheet
             let avgHeaderRow = -1;
             for (let i = 0; i < Math.min(10, averageData.length); i++) {
               const row = averageData[i];
@@ -443,7 +452,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
               });
 
               if (avgEmpCodeIdx !== -1) {
-                // Collect all employee IDs from Average sheet
                 for (let i = avgHeaderRow + 1; i < averageData.length; i++) {
                   const row = averageData[i];
                   if (!row || row.length === 0) continue;
@@ -471,7 +479,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             "Error processing Actual Percentage file:",
             err.message
           );
-          // Don't fail the entire process, just log and continue
         }
       } else {
         console.log(
@@ -479,7 +486,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         );
       }
 
-      // ========== STEP 1: Process Staff file to get Gross SAL. (Software) ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
 
@@ -492,8 +498,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
           months: Map<string, number>;
         }
       > = new Map();
-
-      // In processFiles function, around line 670-730 where Staff file is processed:
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const sheet = staffWorkbook.Sheets[sheetName];
@@ -533,13 +537,12 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
           /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE/i.test(String(h ?? ""))
         );
 
-        // **ADD THIS DEBUG LOG**
         console.log(`📋 Sheet: ${sheetName}`);
         console.log(`  Headers found at row ${headerIdx}`);
         console.log(`  EMP ID column index: ${empIdIdx}`);
         console.log(`  Name column index: ${empNameIdx}`);
         console.log(`  SALARY1 column index: ${salary1Idx}`);
-        console.log(`  DOJ column index: ${dojIdx}`); // ← Check if this is -1
+        console.log(`  DOJ column index: ${dojIdx}`);
         if (dojIdx !== -1) {
           console.log(`  DOJ column header: "${headers[dojIdx]}"`);
         } else {
@@ -566,7 +569,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
 
           if (!empId || isNaN(empId) || !empName) continue;
 
-          // **ADD THIS DEBUG LOG FOR EMPLOYEE 554**
           if (empId === 554) {
             console.log(`🔍 FOUND EMPLOYEE 554 in sheet ${sheetName}:`);
             console.log(`  Name: ${empName}`);
@@ -583,7 +585,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
               months: new Map(),
             });
           } else {
-            // **CRITICAL FIX**: If DOJ already exists, don't overwrite it with null
             const existingEmp = staffEmployees.get(empId)!;
             if (!existingEmp.dateOfJoining && doj) {
               existingEmp.dateOfJoining = doj;
@@ -600,7 +601,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
 
       console.log(`Total staff employees: ${staffEmployees.size}`);
 
-      // ========== STEP 2: Calculate GROSS SAL. (Software) with Oct-2025 estimate ==========
       const softwareEmployeesTotals: Map<
         number,
         {
@@ -612,20 +612,16 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
       > = new Map();
 
       for (const [empId, rec] of staffEmployees) {
-        // Sum all known months
         let baseSum = 0;
         for (const v of rec.months.values()) {
           baseSum += Number(v) || 0;
         }
 
-        // Only calculate October 2025 estimate if September 2025 data exists
-        // AND employee is NOT in the Average sheet
         let estOct = 0;
         const hasSep2025 = rec.months.has("2025-09");
         const isInAverageSheet = employeesToIgnoreOctober.has(empId);
 
         if (hasSep2025 && !isInAverageSheet) {
-          // Compute mean across window months that exist for this employee
           const values: number[] = [];
           for (const mk of AVG_WINDOW) {
             const v = rec.months.get(mk);
@@ -668,17 +664,13 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         `Total employees with GROSS SAL. (Software): ${softwareEmployeesTotals.size}`
       );
 
-      // ========== STEP 3: Read Bonus file to get GROSS 02 (HR) and Department - SUM ALL OCCURRENCES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
-      // Map to store SUM of all Gross2 values per employee (Staff only)
       const bonusGross2Map: Map<number, number> = new Map();
-      // Map to track employee names and departments
       const bonusEmployeeNames: Map<number, string> = new Map();
       const bonusEmployeeDepts: Map<number, string> = new Map();
 
-      // Only process "Staff" sheet
       const staffSheetName = bonusWorkbook.SheetNames.find(
         (name) => name.toLowerCase() === "staff"
       );
@@ -697,7 +689,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         header: 1,
       });
 
-      // Find header row - it's at row 1 for the Staff sheet
       let bonusHeaderRow = -1;
       for (let i = 0; i < Math.min(5, bonusSheetData.length); i++) {
         const row = bonusSheetData[i];
@@ -722,25 +713,21 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
 
       const headers = bonusSheetData[bonusHeaderRow];
 
-      // Find EMP Code column
       const empCodeIdx = headers.findIndex((h: any) => {
         const hStr = String(h || "").toUpperCase();
         return hStr.includes("EMP") && hStr.includes("CODE");
       });
 
-      // Find Employee Name column
       const empNameIdx = headers.findIndex((h: any) => {
         const hStr = String(h || "").toUpperCase();
         return hStr.includes("EMP") && hStr.includes("NAME");
       });
 
-      // Find Department column
       const deptIdx = headers.findIndex((h: any) => {
         const hStr = String(h || "").toUpperCase();
         return hStr.includes("DEPT") || hStr === "DEPTT." || hStr === "DEPTT";
       });
 
-      // Find GROSS 02 column
       const gross2Idx = headers.findIndex((h: any) => {
         const hStr = String(h || "")
           .trim()
@@ -771,7 +758,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         `Staff sheet: Found EmpCode at index ${empCodeIdx}, Department at index ${deptIdx}, GROSS 02 at index ${gross2Idx}`
       );
 
-      // **KEY FIX**: SUM all GROSS 02 values for each employee ID
       let processedCount = 0;
       const duplicateTracker: Map<number, number> = new Map();
 
@@ -786,7 +772,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
 
         if (!empId || isNaN(empId)) continue;
 
-        // **CRITICAL CHANGE**: Add to existing sum instead of replacing
         if (bonusGross2Map.has(empId)) {
           const existingSum = bonusGross2Map.get(empId)!;
           const newSum = existingSum + gross2;
@@ -815,7 +800,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         `Total unique employees in bonus Staff sheet: ${bonusGross2Map.size}`
       );
 
-      // Log employees with multiple entries
       const employeesWithDuplicates = Array.from(
         duplicateTracker.entries()
       ).filter(([_, count]) => count > 1);
@@ -852,7 +836,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         }
       }
 
-      // ========== STEP 4: Build final comparison data ==========
       const calculationResults: any[] = [];
 
       for (const [empId, empData] of softwareEmployeesTotals) {
@@ -860,7 +843,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         const gross2HR = bonusGross2Map.get(empId) || 0;
         const department = bonusEmployeeDepts.get(empId) || empData.dept;
 
-        // Apply formula: IF(percentage=8.33, grossSal, IF(percentage>8.33, grossSal*0.6, grossSal*0.6))
         const calculatedValue = applyBonusFormula(empData.grossSal, percentage);
 
         const difference = calculatedValue - gross2HR;
@@ -880,7 +862,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         });
       }
 
-      // Check for employees in bonus sheet but not in staff
       for (const [empId, gross2] of bonusGross2Map) {
         if (!softwareEmployeesTotals.has(empId)) {
           const name =
@@ -916,7 +897,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     if (staffFile && bonusFile) {
       processFiles();
     }
-    // eslint-disable-next-line
   }, [staffFile, bonusFile]);
 
   const formatCurrency = (value: number) => {
@@ -933,18 +913,16 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     try {
       let date: Date;
       if (typeof dateValue === "number") {
-        // Excel serial date number
         const excelEpoch = new Date(1899, 11, 30);
         date = new Date(excelEpoch.getTime() + dateValue * 86400000);
       } else if (typeof dateValue === "string") {
-        // Try parsing DD.MM.YY or DD-MM-YY format (Indian format)
         const ddmmyyMatch = dateValue.match(
           /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/
         );
         if (ddmmyyMatch) {
           let [, day, month, year] = ddmmyyMatch;
           let y = parseInt(year);
-          if (y < 100) y += 2000; // Convert 23 to 2023
+          if (y < 100) y += 2000;
           date = new Date(y, parseInt(month) - 1, parseInt(day));
         } else {
           date = new Date(dateValue);
@@ -973,9 +951,9 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
         Department: row.department,
         "Date of Joining": formatDate(row.dateOfJoining),
         "Percentage (%)": row.percentage,
-        "GROSS SAL. (Software)": row.grossSal,
-        "Calculated Value (GROSS 02)": row.calculatedValue,
-        "GROSS 02 (HR)": row.gross2HR,
+        "Gross(Software)": row.grossSal,
+        "Gross2(Software)": row.calculatedValue,
+        "Gross2(HR)": row.gross2HR,
         Difference: row.difference,
         Status: row.status,
       }))
@@ -984,6 +962,27 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     XLSX.utils.book_append_sheet(wb, ws, "Step 4 Comparison");
     XLSX.writeFile(wb, `Step4-Gross2-Comparison-Staff.xlsx`);
   };
+
+  // ========== Calculate Grand Totals ==========
+  const calculateGrandTotals = () => {
+    const totalGross2Software = filteredData.reduce(
+      (sum, row) => sum + (Number(row.calculatedValue) || 0),
+      0
+    );
+    const totalGross2HR = filteredData.reduce(
+      (sum, row) => sum + (Number(row.gross2HR) || 0),
+      0
+    );
+    const totalDifference = totalGross2Software - totalGross2HR;
+
+    return {
+      totalGross2Software,
+      totalGross2HR,
+      totalDifference,
+    };
+  };
+
+  const grandTotals = calculateGrandTotals();
 
   const FileCard = ({
     title,
@@ -1011,7 +1010,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
               </span>
             </div>
           </div>
-
           <div className="flex items-center gap-2 text-xs text-green-700 bg-green-100 px-3 py-2 rounded">
             <svg
               className="w-4 h-4"
@@ -1059,13 +1057,11 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-5 px-4">
       <div className="mx-auto max-w-7xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
-          {/* Header */}
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-3xl font-bold text-gray-800">
                 Step 4 - Staff Bonus Calculation
               </h1>
-              
             </div>
             <div className="flex gap-3">
               <button
@@ -1083,102 +1079,67 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             </div>
           </div>
 
-          {/* Formula Explanation */}
-<div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
-  {/* Header with Minimize Button */}
-  <div 
-    className="flex items-center justify-between p-4 cursor-pointer hover:bg-blue-100 transition-colors"
-    onClick={() => setIsFormulaMinimized(!isFormulaMinimized)}
-  >
-    <h3 className="font-bold text-blue-900 flex items-center gap-2">
-      <svg
-        className="w-5 h-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-      Calculation Formula (Staff Only)
-    </h3>
-    <button
-      type="button"
-      className="p-1 rounded-lg hover:bg-blue-200 transition-colors"
-      aria-label={isFormulaMinimized ? "Expand" : "Minimize"}
-    >
-      <svg
-        className={`w-5 h-5 text-blue-900 transition-transform duration-200 ${
-          isFormulaMinimized ? "rotate-180" : ""
-        }`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M5 15l7-7 7 7"
-        />
-      </svg>
-    </button>
-  </div>
+          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              Calculation Formula (Staff Only)
+            </h3>
+            <div className="text-sm text-blue-800 space-y-2">
+              <p>
+                <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
+                Q*0.6, ""))
+              </p>
+              <p>
+                <strong>Where:</strong>
+              </p>
+              <ul className="list-disc ml-6 space-y-1">
+                <li>X = Percentage (calculated from Date of Joining)</li>
+                <li>
+                  Q = Gross(Software) (sum of monthly salaries + Oct 2025
+                  estimate)
+                </li>
+              </ul>
+              <p>
+                <strong>Logic:</strong>
+              </p>
+              <ul className="list-disc ml-6 space-y-1">
+                <li>
+                  If percentage = 8.33% → Gross2(Software) = Gross(Software)
+                </li>
+                <li>
+                  If percentage &gt; 8.33% (10% or 12%) → Gross2(Software) =
+                  Gross(Software) × 0.6
+                </li>
+              </ul>
+              <p>
+                <strong>October Filtering:</strong> If employee ID exists in the
+                "Average" sheet of Actual Percentage file, October estimate is
+                set to 0
+              </p>
+              <p>
+                <strong>Gross2(HR):</strong> SUM of all "GROSS 02" values from
+                bonus file (for duplicate employee IDs)
+              </p>
+              <p className="text-xs text-blue-600 mt-2">
+                Percentage is calculated based on service period as of Oct 12,
+                2025: &lt;12 months = 10% | 12-23 months = 12% | ≥24 months =
+                8.33%
+              </p>
+            </div>
+          </div>
 
-  {/* Collapsible Content */}
-  <div
-    className={`overflow-hidden transition-all duration-300 ${
-      isFormulaMinimized ? "max-h-0" : "max-h-[600px]"
-    }`}
-  >
-    <div className="px-6 pb-6 text-sm text-blue-800 space-y-2">
-      <p>
-        <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
-        Q*0.6, ""))
-      </p>
-      <p>
-        <strong>Where:</strong>
-      </p>
-      <ul className="list-disc ml-6 space-y-1">
-        <li>X = Percentage (calculated from Date of Joining)</li>
-        <li>
-          Q = GROSS SAL. (sum of monthly salaries + Oct 2025 estimate)
-        </li>
-      </ul>
-      <p>
-        <strong>Logic:</strong>
-      </p>
-      <ul className="list-disc ml-6 space-y-1">
-        <li>If percentage = 8.33% → Calculated Value = GROSS SAL.</li>
-        <li>
-          If percentage &gt; 8.33% (10% or 12%) → Calculated Value =
-          GROSS SAL. × 0.6
-        </li>
-      </ul>
-      <p>
-        <strong>October Filtering:</strong> If employee ID exists in the
-        "Average" sheet of Actual Percentage file, October estimate is
-        set to 0
-      </p>
-      <p>
-        <strong>GROSS 02 (HR):</strong> SUM of all "GROSS 02" values
-        from bonus file (for duplicate employee IDs)
-      </p>
-      <p className="text-xs text-blue-600 mt-2">
-        ℹ️ Percentage is calculated based on
-        service period as of Oct 12, 2025: &lt;12 months = 10% | 12-23
-        months = 12% | ≥24 months = 8.33%
-      </p>
-    </div>
-  </div>
-</div>
-
-
-          {/* File Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
@@ -1199,7 +1160,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             />
           </div>
 
-          {/* Missing Files Alert */}
           {(!staffFile || !bonusFile) && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1229,7 +1189,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             </div>
           )}
 
-          {/* Processing Status */}
           {isProcessing && (
             <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1241,7 +1200,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             </div>
           )}
 
-          {/* Error Message */}
           {error && (
             <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1263,14 +1221,12 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
             </div>
           )}
 
-          {/* Comparison Table */}
           {comparisonData.length > 0 && (
             <div className="mt-8">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-gray-800">
                   Staff Bonus Comparison Results
                 </h2>
-
                 <div className="flex gap-3">
                   <button
                     onClick={exportToExcel}
@@ -1313,81 +1269,159 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
                 </div>
               </div>
 
-<div className="border border-gray-300 rounded-lg overflow-hidden">
-  <div className="overflow-x-auto">
-    <div className="max-h-[600px] overflow-y-auto">
-      <table className="w-full border-collapse">
-        <thead className="bg-gray-100 sticky top-0 z-10">
-          <tr>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Employee ID<SortArrows columnKey="employeeId" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Employee Name<SortArrows columnKey="employeeName" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Department<SortArrows columnKey="department" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Date of Joining<SortArrows columnKey="dateOfJoining" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">%
-                <SortArrows columnKey="percentage" />
-              </div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">GROSS SAL. (Software)
-                <SortArrows columnKey="grossSal" />
-              </div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Calculated (GROSS 02)
-                <SortArrows columnKey="calculatedValue" />
-              </div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">GROSS 02 (HR)
-                <SortArrows columnKey="gross2HR" />
-              </div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Difference
-                <SortArrows columnKey="difference" />
-              </div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
-              <div className="flex items-center justify-center">Status<SortArrows columnKey="status" /></div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredData.map((row, idx) => (
-            <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-              <td className="border border-gray-300 px-4 py-2">{row.employeeId}</td>
-              <td className="border border-gray-300 px-4 py-2">{row.employeeName}</td>
-              <td className="border border-gray-300 px-4 py-2 text-center">
-                <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">{row.department}</span>
-              </td>
-              <td className="border border-gray-300 px-4 py-2 text-sm">{formatDate(row.dateOfJoining)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-right font-medium">{row.percentage}%</td>
-              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.grossSal)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-right font-medium text-blue-600">{formatCurrency(row.calculatedValue)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-right font-medium text-purple-600">{formatCurrency(row.gross2HR)}</td>
-              <td className={`border border-gray-300 px-4 py-2 text-right font-medium ${Math.abs(row.difference) <= 12 ? "text-green-600" : "text-red-600"}`}>
-                {formatCurrency(row.difference)}
-              </td>
-              <td className="border border-gray-300 px-4 py-2 text-center">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${row.status === "Match" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{row.status}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
+              <div className="border border-gray-300 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <table className="w-full border-collapse">
+                      <thead className="bg-gray-100 sticky top-0 z-10">
+                        <tr>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Employee ID
+                              <SortArrows columnKey="employeeId" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Employee Name
+                              <SortArrows columnKey="employeeName" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Department
+                              <SortArrows columnKey="department" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Date of Joining
+                              <SortArrows columnKey="dateOfJoining" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              %
+                              <SortArrows columnKey="percentage" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Gross(Software)
+                              <SortArrows columnKey="grossSal" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Gross2(Software)
+                              <SortArrows columnKey="calculatedValue" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Gross2(HR)
+                              <SortArrows columnKey="gross2HR" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Difference
+                              <SortArrows columnKey="difference" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
+                            <div className="flex items-center justify-center">
+                              Status
+                              <SortArrows columnKey="status" />
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            className={
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            }
+                          >
+                            <td className="border border-gray-300 px-4 py-2">
+                              {row.employeeId}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              {row.employeeName}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
+                                {row.department}
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-sm">
+                              {formatDate(row.dateOfJoining)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right font-medium">
+                              {row.percentage}%
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right">
+                              {formatCurrency(row.grossSal)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right font-medium text-blue-600">
+                              {formatCurrency(row.calculatedValue)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right font-medium text-purple-600">
+                              {formatCurrency(row.gross2HR)}
+                            </td>
+                            <td
+                              className={`border border-gray-300 px-4 py-2 text-right font-medium ${
+                                Math.abs(row.difference) <= 12
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {formatCurrency(row.difference)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <span
+                                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                  row.status === "Match"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
 
+                        {/* ========== GRAND TOTAL ROW ========== */}
+                        <tr className="bg-indigo-100 font-bold sticky bottom-0">
+                          <td
+                            colSpan={6}
+                            className="border border-gray-300 px-4 py-3 text-right"
+                          >
+                            <span className="text-lg">GRAND TOTAL</span>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-indigo-900">
+                            {formatCurrency(grandTotals.totalGross2Software)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-indigo-900">
+                            {formatCurrency(grandTotals.totalGross2HR)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+                            {formatCurrency(grandTotals.totalDifference)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-center">
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                              Match
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>Total Staff Employees: {filteredData.length}</div>

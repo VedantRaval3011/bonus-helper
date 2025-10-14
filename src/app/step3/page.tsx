@@ -938,6 +938,27 @@ export default function Step3Page() {
     );
   };
 
+  // ========== Calculate Grand Totals (Always shows as Match) ==========
+  const calculateGrandTotals = () => {
+    const totalGrossSoftware = filteredData.reduce(
+      (sum, row) => sum + (Number(row.grossSalarySoftware) || 0),
+      0
+    );
+    const totalGrossHR = filteredData.reduce(
+      (sum, row) => sum + (Number(row.grossSalaryHR) || 0),
+      0
+    );
+    const totalDifference = totalGrossSoftware - totalGrossHR;
+
+    return {
+      totalGrossSoftware,
+      totalGrossHR,
+      totalDifference,
+    };
+  };
+
+  const grandTotals = calculateGrandTotals();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-5 px-4">
       <div className="mx-auto max-w-7xl">
@@ -1209,6 +1230,27 @@ export default function Step3Page() {
                             </td>
                           </tr>
                         ))}
+                        
+                        {/* ========== GRAND TOTAL ROW (Always Match) ========== */}
+                        <tr className="bg-indigo-100 font-bold sticky bottom-0">
+                          <td colSpan={3} className="border border-gray-300 px-4 py-3 text-right">
+                            <span className="text-lg">GRAND TOTAL</span>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-indigo-900">
+                            {formatCurrency(grandTotals.totalGrossSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-indigo-900">
+                            {formatCurrency(grandTotals.totalGrossHR)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+                            {formatCurrency(grandTotals.totalDifference)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-center">
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                              Match
+                            </span>
+                          </td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
