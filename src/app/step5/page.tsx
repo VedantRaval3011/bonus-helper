@@ -49,7 +49,6 @@ useEffect(() => {
 }, []);
 
 function buildStep5MismatchMessages(rows: any[]) {
-  // Expecting rows with: { employeeId, employeeName, department, percentage, grossSal, calculatedValue, gross2HR, difference, status, dateOfJoining }
   const items: any[] = [];
   for (const r of rows) {
     if (r?.status === 'Mismatch') {
@@ -132,7 +131,6 @@ const SortArrows = ({columnKey}: {columnKey: string}) => {
     </div>
   );
 };
-
 
 function buildStep5SummaryMessage(rows: any[]) {
   const total = rows.length || 0;
@@ -221,9 +219,6 @@ useEffect(() => {
     sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
   });
 }, [comparisonData]);
-
-
-
 
   type FileSlot = { type: string; file: File | null };
 
@@ -315,19 +310,19 @@ useEffect(() => {
   ]);
 
   const INCLUDE_ZEROS_IN_AVG = new Set<number>([
-    20,   // SANJAY RATHOD (Staff - zero in April)
-    27,   // KIRAN SASANIYA (zero in July, Aug)
-    882,  // SHRADDHA DHODHAKIYA (zero in June)
-    898,  // RAMNIK SOLANKI (zero in March, April)
-    999,  // HANSHABEN PARMAR (zero in April, May) - starts from Dec-24
+    20,
+    27,
+    882,
+    898,
+    999,
   ]);
 
   const EXCLUDE_ZEROS_IN_AVG = new Set<number>([
-    1054, // Different employee (joined April 2025)
+    1054,
   ]);
 
   const EMPLOYEE_START_MONTHS: Record<number, string> = {
-    999: "2024-12",  // Hanshaben Parmar joined December 2024
+    999: "2024-12",
   };
 
   const DEFAULT_PERCENTAGE = 8.33;
@@ -355,7 +350,6 @@ useEffect(() => {
       console.log("=".repeat(60));
 
       // ========== LOAD ACTUAL PERCENTAGE DATA ==========
-// ========== LOAD ACTUAL PERCENTAGE DATA ==========
 const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
 const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
 const actualPercentageSheet =
@@ -365,7 +359,6 @@ const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
   { header: 1 }
 );
 
-// Store actual percentage value for each employee
 const employeePercentageMap = new Map<number, number>();
 let headerRow = -1;
 
@@ -412,7 +405,6 @@ if (headerRow !== -1) {
 console.log(
   `📋 Loaded custom percentages for ${employeePercentageMap.size} employees`
 );
-
 
       // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
@@ -644,13 +636,11 @@ console.log(
 
           const emp = staffEmployees.get(empId)!;
           
-          // Check if employee should be processed for this month
           const startMonth = EMPLOYEE_START_MONTHS[empId];
           if (startMonth && monthKey < startMonth) {
             continue;
           }
           
-          // Store zero values for special employees
           if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
             emp.months.set(monthKey, salary1);
           } else {
@@ -761,13 +751,11 @@ console.log(
 
           const emp = workerEmployees.get(empId)!;
           
-          // Check if employee should be processed for this month
           const startMonth = EMPLOYEE_START_MONTHS[empId];
           if (startMonth && monthKey < startMonth) {
             continue;
           }
           
-          // Store zero values for special employees
           if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
             emp.months.set(monthKey, salary1);
           } else {
@@ -804,29 +792,24 @@ console.log(
           const excludeZeros = EXCLUDE_ZEROS_IN_AVG.has(empId);
           const hasCustomStart = EMPLOYEE_START_MONTHS[empId] !== undefined;
           
-          // Build custom window for employees with start months
           const employeeWindow = hasCustomStart
             ? AVG_WINDOW.filter(mk => mk >= EMPLOYEE_START_MONTHS[empId])
             : AVG_WINDOW;
           
-          // Collect all months in window
           for (const mk of employeeWindow) {
             const v = rec.months.get(mk);
             
             if (includeZeros) {
-              // For employees with genuine zero months, include them
               const val = v !== undefined ? Number(v) : 0;
               baseSum += val;
               monthsIncluded.push({ month: mk, value: val });
             } else if (excludeZeros) {
-              // For mid-year joiners, only count months they were employed
               if (v !== undefined && v !== null) {
                 const val = Number(v);
                 baseSum += val;
                 monthsIncluded.push({ month: mk, value: val });
               }
             } else {
-              // Normal employees: only non-zero months
               if (v != null && !isNaN(Number(v)) && Number(v) > 0) {
                 baseSum += Number(v);
                 monthsIncluded.push({ month: mk, value: Number(v) });
@@ -844,14 +827,11 @@ console.log(
               `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
-            // Calculate October estimate
             if (includeZeros) {
-              // Use employeeWindow length for custom start dates
               const divisor = hasCustomStart ? employeeWindow.length : 11;
               estOct = baseSum / divisor;
               total = baseSum + estOct;
             } else {
-              // Average of only counted months
               const values = monthsIncluded.map(m => m.value);
               estOct = values.reduce((a, b) => a + b, 0) / values.length;
               total = baseSum + estOct;
@@ -875,23 +855,18 @@ console.log(
 
       console.log(`✅ Gross Salary computed (Step-3 logic): ${grossSalaryData.size} employees`);
 
-      // ========== CALCULATE REGISTER WITH NEW 60% RULE ==========
-// ========== CALCULATE REGISTER WITH VARIABLE PERCENTAGES ==========
+      // ========== CALCULATE REGISTER WITH VARIABLE PERCENTAGES ==========
 const comparison: any[] = [];
 
 for (const [empId, empData] of grossSalaryData) {
-  // Get the employee's specific percentage (default to 8.33% if not specified)
   const employeePercentage = employeePercentageMap.get(empId) || DEFAULT_PERCENTAGE;
   
-  // Determine if 60% gross adjustment should be applied
-  // Rule: Apply 60% adjustment ONLY for 12% employees
   const shouldApplyGrossAdjustment = employeePercentage === SPECIAL_PERCENTAGE;
   
   let registerSoftware: number;
   let adjustedGross: number;
   
   if (shouldApplyGrossAdjustment) {
-    // For 12% employees: (Gross × 60%) × 12%
     adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
     registerSoftware = (adjustedGross * employeePercentage) / 100;
     
@@ -899,7 +874,6 @@ for (const [empId, empData] of grossSalaryData) {
       `🎯 Emp ${empId}: ${employeePercentage}% with 60% adjustment | Gross=₹${empData.grossSalary.toFixed(2)} → 60%=₹${adjustedGross.toFixed(2)} → ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
     );
   } else {
-    // For all other percentages: Direct application on full gross
     adjustedGross = empData.grossSalary;
     registerSoftware = (empData.grossSalary * employeePercentage) / 100;
     
@@ -920,9 +894,9 @@ for (const [empId, empData] of grossSalaryData) {
     employeeName: empData.name,
     department: empData.dept,
     grossSalarySoftware: empData.grossSalary,
-    adjustedGross: adjustedGross, // NEW: Show the adjusted gross used
-    percentage: employeePercentage, // NOW USES ACTUAL VALUE
-    appliedGrossAdjustment: shouldApplyGrossAdjustment, // NEW: Flag if 60% was applied
+    adjustedGross: adjustedGross,
+    percentage: employeePercentage,
+    appliedGrossAdjustment: shouldApplyGrossAdjustment,
     registerSoftware: registerSoftware,
     registerHR: registerHR,
     hrOccurrences: occurrences,
@@ -936,7 +910,6 @@ for (const [empId, empData] of grossSalaryData) {
     );
   }
 }
-
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
@@ -998,6 +971,27 @@ for (const [empId, empData] of grossSalaryData) {
     XLSX.utils.book_append_sheet(wb, ws, "Register Calculation");
     XLSX.writeFile(wb, `Step5-Register-Calculation-${departmentFilter}.xlsx`);
   };
+
+  // ========== Calculate Grand Totals ==========
+  const calculateGrandTotals = () => {
+    const totalRegisterSoftware = filteredData.reduce(
+      (sum, row) => sum + (Number(row.registerSoftware) || 0),
+      0
+    );
+    const totalRegisterHR = filteredData.reduce(
+      (sum, row) => sum + (Number(row.registerHR) || 0),
+      0
+    );
+    const totalDifference = totalRegisterSoftware - totalRegisterHR;
+
+    return {
+      totalRegisterSoftware,
+      totalRegisterHR,
+      totalDifference,
+    };
+  };
+
+  const grandTotals = calculateGrandTotals();
 
   const FileCard = ({
     title,
@@ -1256,10 +1250,10 @@ for (const [empId, empData] of grossSalaryData) {
               <div className="flex items-center justify-center">%<SortArrows columnKey="percentage" /></div>
             </th>
             <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Register (Software)<SortArrows columnKey="registerSoftware" /></div>
+              <div className="flex items-center justify-end">Register(Software)<SortArrows columnKey="registerSoftware" /></div>
             </th>
             <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Register (HR)<SortArrows columnKey="registerHR" /></div>
+              <div className="flex items-center justify-end">Register(HR)<SortArrows columnKey="registerHR" /></div>
             </th>
            
             <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
@@ -1294,6 +1288,27 @@ for (const [empId, empData] of grossSalaryData) {
               </td>
             </tr>
           ))}
+          
+          {/* ========== GRAND TOTAL ROW ========== */}
+          <tr className="bg-purple-100 font-bold sticky bottom-0">
+            <td colSpan={6} className="border border-gray-300 px-4 py-3 text-right">
+              <span className="text-lg">GRAND TOTAL</span>
+            </td>
+            <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+              {formatCurrency(grandTotals.totalRegisterSoftware)}
+            </td>
+            <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+              {formatCurrency(grandTotals.totalRegisterHR)}
+            </td>
+            <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+              {formatCurrency(grandTotals.totalDifference)}
+            </td>
+            <td className="border border-gray-300 px-4 py-3 text-center">
+              <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                Match
+              </span>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

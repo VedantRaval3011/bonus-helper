@@ -14,8 +14,10 @@ type SortableColumn =
   | "isEligible"
   | "percentage"
   | "grossSalarySoftware"
+  | "adjustedGross"
   | "registerSoftware"
   | "unpaidSoftware"
+  | "alreadyPaid"
   | "loanDeduction"
   | "finalRTGSSoftware"
   | "finalRTGSHR"
@@ -32,7 +34,7 @@ export default function Step9Page() {
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
 
-  // 🎯 NEW: Sorting state
+  // 🎯 Sorting state
   const [sortColumn, setSortColumn] = useState<SortableColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
@@ -78,8 +80,10 @@ export default function Step9Page() {
             isEligible: r.isEligible,
             percentage: r.percentage,
             grossSalarySoftware: r.grossSalarySoftware,
+            adjustedGross: r.adjustedGross,
             registerSoftware: r.registerSoftware,
             unpaidSoftware: r.unpaidSoftware,
+            alreadyPaid: r.alreadyPaid,
             loanDeduction: r.loanDeduction,
             finalRTGSSoftware: r.finalRTGSSoftware,
             finalRTGSHR: r.finalRTGSHR,
@@ -126,6 +130,9 @@ export default function Step9Page() {
     const staffUnpaidSum = sum(
       staffRows.map((r) => Number(r.unpaidSoftware || 0))
     );
+    const staffAlreadyPaidSum = sum(
+      staffRows.map((r) => Number(r.alreadyPaid || 0))
+    );
     const staffLoanSum = sum(
       staffRows.map((r) => Number(r.loanDeduction || 0))
     );
@@ -144,6 +151,9 @@ export default function Step9Page() {
     );
     const workerUnpaidSum = sum(
       workerRows.map((r) => Number(r.unpaidSoftware || 0))
+    );
+    const workerAlreadyPaidSum = sum(
+      workerRows.map((r) => Number(r.alreadyPaid || 0))
     );
     const workerLoanSum = sum(
       workerRows.map((r) => Number(r.loanDeduction || 0))
@@ -178,6 +188,7 @@ export default function Step9Page() {
           grossSalSum: staffGrossSalSum,
           registerSum: staffRegisterSum,
           unpaidSum: staffUnpaidSum,
+          alreadyPaidSum: staffAlreadyPaidSum,
           loanSum: staffLoanSum,
           finalRTGSSWSum: staffFinalRTGSSWSum,
           finalRTGSHRSum: staffFinalRTGSHRSum,
@@ -188,6 +199,7 @@ export default function Step9Page() {
           grossSalSum: workerGrossSalSum,
           registerSum: workerRegisterSum,
           unpaidSum: workerUnpaidSum,
+          alreadyPaidSum: workerAlreadyPaidSum,
           loanSum: workerLoanSum,
           finalRTGSSWSum: workerFinalRTGSSWSum,
           finalRTGSHRSum: workerFinalRTGSHRSum,
@@ -397,6 +409,7 @@ export default function Step9Page() {
 
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
+  const SPECIAL_GROSS_MULTIPLIER = 0.6; // 60% of gross for 12% employees
   const TOLERANCE = 12;
 
   const referenceDate = new Date(Date.UTC(2025, 9, 30));
@@ -481,9 +494,12 @@ export default function Step9Page() {
     try {
       console.log("=".repeat(60));
       console.log(
-        "📊 STEP 9: Final RTGS Comparison (with 0 vs Blank handling)"
+        "📊 STEP 9: Final RTGS Comparison (with adj.gross + already paid logic)"
       );
       console.log("=".repeat(60));
+      console.log("⚡ NEW FORMULA: Register - Unpaid - Loan - Already Paid = Final RTGS");
+      console.log("⚡ 12% employees: (Step3-Gross × 60%) × 12% = Register");
+      console.log("📌 8.33% employees: Step3-Gross × 8.33% = Register");
 
       // ========== LOAD LOAN DEDUCTION DATA ==========
       const loanBuffer = await loanDeductionFile.arrayBuffer();
@@ -623,14 +639,14 @@ export default function Step9Page() {
 
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
 
-      // ========== LOAD BONUS FILE FOR FINAL RTGS (HR) ==========
+      // ========== 🆕 LOAD "ALREADY PAID" (PAID) DATA FROM BONUS FILE ==========
+      const alreadyPaidMap: Map<number, { paid: number; sheets: string[] }> = new Map();
+
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
-      const hrFinalRTGSData: Map<
-        number,
-        { finalRTGS: number; sheets: string[] }
-      > = new Map();
+      console.log("\n💳 LOADING 'ALREADY PAID' (PAID) DATA FROM BONUS SHEETS");
+      console.log("=".repeat(60));
 
       for (const sheetName of bonusWorkbook.SheetNames) {
         if (sheetName === "Loan Ded.") {
@@ -638,7 +654,130 @@ export default function Step9Page() {
           continue;
         }
 
-        console.log(`📄 Processing Bonus sheet: ${sheetName}`);
+        console.log(`📄 Processing Bonus sheet for Paid: ${sheetName}`);
+        const sheet = bonusWorkbook.Sheets[sheetName];
+        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+        });
+
+        let sheetHeaderRow = -1;
+        for (let i = 0; i < Math.min(10, sheetData.length); i++) {
+          if (
+            sheetData[i] &&
+            sheetData[i].some((v: any) => {
+              const t = norm(v);
+              return t === "EMPCODE" || t === "EMPLOYEECODE";
+            })
+          ) {
+            sheetHeaderRow = i;
+            break;
+          }
+        }
+
+        if (sheetHeaderRow === -1) {
+          console.log(`⚠️ No header found in ${sheetName}`);
+          continue;
+        }
+
+        const headers = sheetData[sheetHeaderRow];
+        const empCodeIdx = headers.findIndex((h: any) =>
+          ["EMPCODE", "EMPLOYEECODE", "EMP CODE"].includes(
+            String(h ?? "")
+              .trim()
+              .toUpperCase()
+              .replace(/\s+/g, "")
+          )
+        );
+
+        // 🎯 Find "PAID" column (similar to how Step 6 does it)
+        const paidIdx = headers.findIndex((h: any) => {
+          const headerStr = String(h ?? "")
+            .trim()
+            .toUpperCase();
+          return (
+            headerStr === "PAID" ||
+            headerStr === "ALREADY PAID" ||
+            headerStr === "ALREADYPAID" ||
+            /^PAID$/i.test(headerStr)
+          );
+        });
+
+        if (empCodeIdx === -1 || paidIdx === -1) {
+          console.log(
+            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, Paid: ${paidIdx})`
+          );
+          continue;
+        }
+
+        console.log(
+          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Paid at ${paidIdx}`
+        );
+
+        let recordsInSheet = 0;
+        for (let i = sheetHeaderRow + 1; i < sheetData.length; i++) {
+          const row = sheetData[i];
+          if (!row || row.length === 0) continue;
+
+          const empCodeRaw = row[empCodeIdx];
+          const paidRaw = row[paidIdx];
+
+          if (
+            empCodeRaw == null ||
+            empCodeRaw === "" ||
+            paidRaw == null ||
+            paidRaw === ""
+          )
+            continue;
+
+          const empCode = Number(empCodeRaw);
+          const paid = Number(paidRaw);
+
+          if (isNaN(empCode) || isNaN(paid)) continue;
+
+          recordsInSheet++;
+
+          if (!alreadyPaidMap.has(empCode)) {
+            alreadyPaidMap.set(empCode, {
+              paid: paid,
+              sheets: [sheetName],
+            });
+          } else {
+            const existing = alreadyPaidMap.get(empCode)!;
+            existing.paid += paid;
+            existing.sheets.push(sheetName);
+            console.log(
+              `  🔄 Emp ${empCode}: Adding Paid ₹${paid.toFixed(
+                2
+              )} from ${sheetName} (Total: ₹${existing.paid.toFixed(2)})`
+            );
+          }
+        }
+
+        console.log(
+          `  ✅ Processed ${recordsInSheet} 'Paid' records from ${sheetName}`
+        );
+      }
+
+      console.log(
+        `✅ Already Paid data loaded: ${alreadyPaidMap.size} employees`
+      );
+
+      // ========== LOAD BONUS FILE FOR FINAL RTGS (HR) ==========
+      const hrFinalRTGSData: Map<
+        number,
+        { finalRTGS: number; sheets: string[] }
+      > = new Map();
+
+      console.log("\n📊 LOADING 'FINAL RTGS' DATA FROM BONUS SHEETS");
+      console.log("=".repeat(60));
+
+      for (const sheetName of bonusWorkbook.SheetNames) {
+        if (sheetName === "Loan Ded.") {
+          console.log(`⏭️ Skipping sheet: ${sheetName}`);
+          continue;
+        }
+
+        console.log(`📄 Processing Bonus sheet for Final RTGS: ${sheetName}`);
         const sheet = bonusWorkbook.Sheets[sheetName];
         const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
@@ -1097,7 +1236,12 @@ export default function Step9Page() {
 
       console.log(`✅ Employee data loaded: ${employeeData.size} employees`);
 
-      // ========== CALCULATE FINAL RTGS ==========
+      // ========== 🆕 CALCULATE FINAL RTGS WITH NEW FORMULA ==========
+      console.log("\n💰 CALCULATING FINAL RTGS WITH NEW FORMULA");
+      console.log("=".repeat(60));
+      console.log("Formula: Register - Unpaid - Loan - Already Paid = Final RTGS");
+      console.log("=".repeat(60));
+
       const comparison: any[] = [];
 
       for (const [empId, empData] of employeeData) {
@@ -1105,7 +1249,21 @@ export default function Step9Page() {
           ? SPECIAL_PERCENTAGE
           : DEFAULT_PERCENTAGE;
 
-        const registerSoftware = (empData.grossSalary * percentage) / 100;
+        // Apply adj.gross logic just like Step-5
+        const shouldApplyGrossAdjustment = percentage === SPECIAL_PERCENTAGE;
+        
+        let adjustedGross: number;
+        let registerSoftware: number;
+        
+        if (shouldApplyGrossAdjustment) {
+          // For 12% employees: adj.gross = gross × 60%
+          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
+          registerSoftware = (adjustedGross * percentage) / 100;
+        } else {
+          // For 8.33% employees: use full gross
+          adjustedGross = empData.grossSalary;
+          registerSoftware = (empData.grossSalary * percentage) / 100;
+        }
 
         const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
 
@@ -1121,9 +1279,14 @@ export default function Step9Page() {
         }
 
         const loanDeduction = loanMap.get(empId) || 0;
+        
+        // 🆕 Get Already Paid amount
+        const alreadyPaidData = alreadyPaidMap.get(empId);
+        const alreadyPaid = alreadyPaidData?.paid || 0;
 
+        // 🆕 NEW FORMULA: Register - Unpaid - Loan - Already Paid
         const finalRTGSSoftware =
-          registerSoftware - unpaidSoftware - loanDeduction;
+          registerSoftware - unpaidSoftware - loanDeduction - alreadyPaid;
 
         const hrData = hrFinalRTGSData.get(empId);
         const finalRTGSHR = hrData?.finalRTGS || 0;
@@ -1140,8 +1303,10 @@ export default function Step9Page() {
           isEligible: isEligible,
           percentage: percentage,
           grossSalarySoftware: empData.grossSalary,
+          adjustedGross: adjustedGross,
           registerSoftware: registerSoftware,
           unpaidSoftware: unpaidSoftware,
+          alreadyPaid: alreadyPaid,
           loanDeduction: loanDeduction,
           finalRTGSSoftware: finalRTGSSoftware,
           finalRTGSHR: finalRTGSHR,
@@ -1151,19 +1316,17 @@ export default function Step9Page() {
         });
 
         console.log(
-          `Emp ${empId}: Gross=₹${empData.grossSalary.toFixed(
+          `Emp ${empId}: Register=₹${registerSoftware.toFixed(
             2
-          )}, %=${percentage}, Register=₹${registerSoftware.toFixed(
+          )} - Unpaid=₹${unpaidSoftware.toFixed(
             2
-          )}, Unpaid=₹${unpaidSoftware.toFixed(
+          )} - Loan=₹${loanDeduction.toFixed(
             2
-          )}, Loan=₹${loanDeduction.toFixed(
+          )} - AlreadyPaid=₹${alreadyPaid.toFixed(
             2
-          )}, Final RTGS (SW)=₹${finalRTGSSoftware.toFixed(
+          )} = Final RTGS (SW)=₹${finalRTGSSoftware.toFixed(
             2
-          )}, Final RTGS (HR)=₹${finalRTGSHR.toFixed(2)} [${hrSheets.join(
-            ", "
-          )}]`
+          )}, Final RTGS (HR)=₹${finalRTGSHR.toFixed(2)}`
         );
       }
 
@@ -1171,7 +1334,7 @@ export default function Step9Page() {
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("✅ Final RTGS comparison completed");
+      console.log("✅ Final RTGS comparison completed with new formula");
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -1201,7 +1364,7 @@ export default function Step9Page() {
     loanDeductionFile,
   ]);
 
-  // 🎯 NEW: Apply filters and sorting
+  // Apply filters and sorting
   useEffect(() => {
     let filtered = comparisonData;
 
@@ -1217,7 +1380,7 @@ export default function Step9Page() {
       }
     }
 
-    // 🎯 NEW: Apply sorting
+    // Apply sorting
     if (sortColumn && sortDirection) {
       filtered = [...filtered].sort((a, b) => {
         let aVal = a[sortColumn];
@@ -1246,13 +1409,13 @@ export default function Step9Page() {
     setFilteredData(filtered);
   }, [departmentFilter, eligibilityFilter, comparisonData, sortColumn, sortDirection]);
 
-  // 🎯 NEW: Sort handler
+  // Sort handler
   const handleSort = (column: SortableColumn, direction: "asc" | "desc") => {
     setSortColumn(column);
     setSortDirection(direction);
   };
 
-  // 🎯 NEW: Sort button component
+  // Sort button component
   const SortButtons = ({ column }: { column: SortableColumn }) => {
     return (
       <div className="inline-flex flex-col ml-1">
@@ -1265,7 +1428,7 @@ export default function Step9Page() {
           }`}
           title="Sort Ascending"
         >
-            <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 10 10">
+          <svg className="w-2 h-2" fill="currentColor" viewBox="0 0 10 10">
             <path d="M5 2l3 3H2z" />
           </svg>
         </button>
@@ -1309,8 +1472,10 @@ export default function Step9Page() {
         Eligible: row.isEligible ? "YES" : "NO",
         "%": row.percentage,
         Gross: row.grossSalarySoftware,
+        "Adj. Gross": row.adjustedGross,
         Register: row.registerSoftware,
         Unpaid: row.unpaidSoftware,
+        "Already Paid": row.alreadyPaid,
         Loan: row.loanDeduction,
         "Final RTGS (Software)": row.finalRTGSSoftware,
         "Final RTGS (HR)": row.finalRTGSHR,
@@ -1333,10 +1498,15 @@ export default function Step9Page() {
       <div className="container mx-auto px-4 py-8 max-w-[92rem]">
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold text-gray-800">
-              Step 9: Final RTGS Comparison
-            </h1>
-           <div className="flex gap-3">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">
+                Step 9: Final RTGS Comparison
+              </h1>
+              <p className="text-sm text-gray-600 mt-2">
+                Formula: Register - Unpaid - Loan - Already Paid = Final RTGS
+              </p>
+            </div>
+            <div className="flex gap-3">
               <button
                 onClick={() => router.push("/step8")}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
@@ -1349,7 +1519,6 @@ export default function Step9Page() {
               >
                 Back to Step 1
               </button>
-              
             </div>
           </div>
 
@@ -1412,190 +1581,120 @@ export default function Step9Page() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto border border-gray-300 rounded-lg">
-                <div className="max-h-[600px] overflow-y-auto">
-                  <table className="min-w-full bg-white">
-                    <thead>
-                      <tr>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-1 py-2 bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            Emp ID
-                            <SortButtons column="employeeId" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-1 py-2 bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            Name
-                            <SortButtons column="employeeName" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-1 py-2 bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            Dept
-                            <SortButtons column="department" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-1 py-2 text-center bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            MOS
-                            <SortButtons column="monthsOfService" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-1 py-2 text-center bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            Eligible
-                            <SortButtons column="isEligible" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            %
-                            <SortButtons column="percentage" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
-                          <div className="flex items-center justify-end">
-                            Gross Salary
-                            <SortButtons column="grossSalarySoftware" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
-                          <div className="flex items-center justify-end">
-                            Register
-                            <SortButtons column="registerSoftware" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
-                          <div className="flex items-center justify-end">
-                            Unpaid
-                            <SortButtons column="unpaidSoftware" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
-                          <div className="flex items-center justify-end">
-                            Loan Ded.
-                            <SortButtons column="loanDeduction" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-blue-100">
-                          <div className="flex items-center justify-end">
-                            Final RTGS (SW)
-                            <SortButtons column="finalRTGSSoftware" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-purple-100">
-                          <div className="flex items-center justify-end">
-                            Final RTGS (HR)
-                            <SortButtons column="finalRTGSHR" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-right bg-gray-100">
-                          <div className="flex items-center justify-end">
-                            Diff
-                            <SortButtons column="difference" />
-                          </div>
-                        </th>
-                        <th className="sticky top-0 z-10 border border-gray-300 px-3 py-2 text-center bg-gray-100">
-                          <div className="flex items-center justify-center">
-                            Status
-                            <SortButtons column="status" />
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredData.map((row, idx) => (
-                        <tr
-                          key={idx}
-                          className={`${
-                            idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                          }`}
-                        >
-                          <td className="border border-gray-300 px-3 py-2">
-                            {row.employeeId}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2">
-                            {row.employeeName}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.department === "Staff"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-purple-100 text-purple-800"
-                              }`}
-                            >
-                              {row.department}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            {row.monthsOfService || 0}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.isEligible
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {row.isEligible ? "YES" : "NO"}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.percentage === 12.0
-                                  ? "bg-yellow-100 text-yellow-800"
-                                  : "bg-gray-100 text-gray-800"
-                              }`}
-                            >
-                              {row.percentage}%
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.grossSalarySoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.registerSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.unpaidSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-orange-600">
-                            {formatCurrency(row.loanDeduction)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-bold text-blue-600">
-                            {formatCurrency(row.finalRTGSSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-bold text-purple-600">
-                            {formatCurrency(row.finalRTGSHR)}
-                          </td>
-                          <td
-                            className={`border border-gray-300 px-3 py-2 text-right font-medium ${
-                              Math.abs(row.difference) <= TOLERANCE
-                                ? "text-green-600"
-                                : "text-red-600"
+              <div className="overflow-x-auto">
+                <table className="min-w-full bg-white border border-gray-300">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="px-4 py-2 border">
+                        Emp ID <SortButtons column="employeeId" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Name <SortButtons column="employeeName" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Dept <SortButtons column="department" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        MOS <SortButtons column="monthsOfService" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Eligible <SortButtons column="isEligible" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        % <SortButtons column="percentage" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Gross <SortButtons column="grossSalarySoftware" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Adj. Gross <SortButtons column="adjustedGross" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Register <SortButtons column="registerSoftware" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Unpaid <SortButtons column="unpaidSoftware" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Already Paid <SortButtons column="alreadyPaid" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Loan <SortButtons column="loanDeduction" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Final RTGS (SW) <SortButtons column="finalRTGSSoftware" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Final RTGS (HR) <SortButtons column="finalRTGSHR" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Difference <SortButtons column="difference" />
+                      </th>
+                      <th className="px-4 py-2 border">
+                        Status <SortButtons column="status" />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredData.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className={
+                          row.status === "Match"
+                            ? "bg-green-50"
+                            : "bg-red-50"
+                        }
+                      >
+                        <td className="px-4 py-2 border">{row.employeeId}</td>
+                        <td className="px-4 py-2 border">{row.employeeName}</td>
+                        <td className="px-4 py-2 border">{row.department}</td>
+                        <td className="px-4 py-2 border">{row.monthsOfService}</td>
+                        <td className="px-4 py-2 border">
+                          {row.isEligible ? "YES" : "NO"}
+                        </td>
+                        <td className="px-4 py-2 border">{row.percentage}%</td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.grossSalarySoftware)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.adjustedGross)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.registerSoftware)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.unpaidSoftware)}
+                        </td>
+                        <td className="px-4 py-2 border text-right bg-yellow-50">
+                          {formatCurrency(row.alreadyPaid)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.loanDeduction)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.finalRTGSSoftware)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.finalRTGSHR)}
+                        </td>
+                        <td className="px-4 py-2 border text-right">
+                          {formatCurrency(row.difference)}
+                        </td>
+                        <td className="px-4 py-2 border text-center">
+                          <span
+                            className={`px-2 py-1 rounded ${
+                              row.status === "Match"
+                                ? "bg-green-200 text-green-800"
+                                : "bg-red-200 text-red-800"
                             }`}
                           >
-                            {formatCurrency(row.difference)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                row.status === "Match"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-orange-100 text-orange-800"
-                              }`}
-                            >
-                              {row.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">

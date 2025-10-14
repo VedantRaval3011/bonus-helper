@@ -14,7 +14,7 @@ export default function Step8Page() {
   const [error, setError] = useState<string | null>(null);
   const [isLogicMinimized, setIsLogicMinimized] = useState(true);
 
-  // 🎯 NEW: Sorting state
+  // 🎯 Sorting state
   const [sortConfig, setSortConfig] = useState<{
     key: string | null;
     direction: "asc" | "desc" | null;
@@ -124,9 +124,14 @@ export default function Step8Page() {
   ];
 
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
+  const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
+    937, 1039, 1065, 1105, 59, 161,
+  ]);
 
   const TOLERANCE = 12;
   const REGISTER_PERCENTAGE = 8.33;
+  const SPECIAL_PERCENTAGE = 12.0;
+  const SPECIAL_GROSS_MULTIPLIER = 0.6; // 60% for 12% employees
 
   const calculatePercentageByMonths = (monthsWorked: number): number => {
     if (monthsWorked < 12) {
@@ -248,14 +253,16 @@ export default function Step8Page() {
             name: r.employeeName,
             department: r.department,
             grossSal: r.grossSal,
+            adjustedGross: r.adjustedGross,
             excludedOctober: r.excludedOctober,
             registerPercentage: r.registerPercentage,
             actualPercentage: r.actualPercentage,
             percentageSource: r.percentageSource,
             registerCalculated: r.registerCalculated,
             actualCalculated: r.actualCalculated,
-            reimCalculated: r.reimCalculated,
+            reimSoftware: r.reimSoftware,
             reimHR: r.reimHR,
+            paymentStatus: r.paymentStatus,
             diff: r.difference,
             tolerance: TOLERANCE,
           },
@@ -284,6 +291,10 @@ export default function Step8Page() {
       (r) => r.percentageSource === "Custom"
     ).length;
     const zeroOctoberCount = rows.filter((r) => r.excludedOctober).length;
+    const alreadyPaidCount = rows.filter(
+      (r) => r.paymentStatus === "Already Paid"
+    ).length;
+    const unpaidCount = rows.filter((r) => r.paymentStatus === "Unpaid").length;
 
     const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
     const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
@@ -293,8 +304,8 @@ export default function Step8Page() {
     const staffActualSum = sum(
       staffRows.map((r) => Number(r.actualCalculated || 0))
     );
-    const staffReimCalcSum = sum(
-      staffRows.map((r) => Number(r.reimCalculated || 0))
+    const staffReimSoftwareSum = sum(
+      staffRows.map((r) => Number(r.reimSoftware || 0))
     );
     const staffReimHRSum = sum(staffRows.map((r) => Number(r.reimHR || 0)));
 
@@ -307,8 +318,8 @@ export default function Step8Page() {
     const workerActualSum = sum(
       workerRows.map((r) => Number(r.actualCalculated || 0))
     );
-    const workerReimCalcSum = sum(
-      workerRows.map((r) => Number(r.reimCalculated || 0))
+    const workerReimSoftwareSum = sum(
+      workerRows.map((r) => Number(r.reimSoftware || 0))
     );
     const workerReimHRSum = sum(workerRows.map((r) => Number(r.reimHR || 0)));
 
@@ -326,6 +337,8 @@ export default function Step8Page() {
           tolerance: TOLERANCE,
           customPercentageCount,
           zeroOctoberCount,
+          alreadyPaidCount,
+          unpaidCount,
         },
         staff: {
           count: staffRows.length,
@@ -333,7 +346,7 @@ export default function Step8Page() {
           grossSalSum: staffGrossSalSum,
           registerSum: staffRegisterSum,
           actualSum: staffActualSum,
-          reimCalcSum: staffReimCalcSum,
+          reimSoftwareSum: staffReimSoftwareSum,
           reimHRSum: staffReimHRSum,
         },
         worker: {
@@ -342,7 +355,7 @@ export default function Step8Page() {
           grossSalSum: workerGrossSalSum,
           registerSum: workerRegisterSum,
           actualSum: workerActualSum,
-          reimCalcSum: workerReimCalcSum,
+          reimSoftwareSum: workerReimSoftwareSum,
           reimHRSum: workerReimHRSum,
         },
       },
@@ -377,11 +390,13 @@ export default function Step8Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 8: Reimbursement with Custom Percentages");
+      console.log("📊 STEP 8: Reimbursement with Adj. Gross & Payment Status");
       console.log("=".repeat(60));
 
+      // ========== LOAD ACTUAL PERCENTAGE FILE ==========
       const customPercentageMap = new Map<number, number>();
       const zeroOctoberEmployees = new Set<number>();
+      const employeesInPerSheet = new Set<number>(); // NEW: Track employees in Per sheet
 
       if (actualPercentageFile) {
         console.log("\n📋 Loading Actual Percentage Bonus Data...");
@@ -411,8 +426,9 @@ export default function Step8Page() {
               !isNaN(bonusPercentage)
             ) {
               customPercentageMap.set(empCode, bonusPercentage);
+              employeesInPerSheet.add(empCode); // Track this employee
               console.log(
-                `   Emp ${empCode}: Custom percentage for ACTUAL = ${bonusPercentage}%`
+                `   Emp ${empCode}: Custom percentage for ACTUAL = ${bonusPercentage}% (will use Adj. Gross for Register)`
               );
             }
           }
@@ -446,12 +462,16 @@ export default function Step8Page() {
         console.log(
           `📊 Loaded ${zeroOctoberEmployees.size} zero-October employees`
         );
+        console.log(
+          `📊 Loaded ${employeesInPerSheet.size} employees in Per sheet (will use Adj. Gross for Register)`
+        );
       } else {
         console.log(
           "\n⚠️ Actual Percentage file not found - using calculated percentages"
         );
       }
 
+      // ========== LOAD BONUS FILE ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
@@ -459,11 +479,14 @@ export default function Step8Page() {
         number,
         {
           reimHR: number;
+          unpaidHR: number;
+          alreadyPaidHR: number;
           name: string;
           dept: string;
         }
       > = new Map();
 
+      // Process Staff sheet (2nd sheet)
       if (bonusWorkbook.SheetNames.length > 1) {
         const staffSheetName = bonusWorkbook.SheetNames[1];
         const staffSheet = bonusWorkbook.Sheets[staffSheetName];
@@ -496,6 +519,12 @@ export default function Step8Page() {
             const reimIdx = headers.findIndex((h: any) =>
               /^REIM\.?$/i.test(String(h ?? "").trim())
             );
+            const unpaidIdx = headers.findIndex((h: any) =>
+              /^UNPAID$/i.test(String(h ?? "").trim())
+            );
+            const alreadyPaidIdx = headers.findIndex((h: any) =>
+              /^ALREADY.*PAID$/i.test(String(h ?? "").trim())
+            );
 
             if (empCodeIdx === -1 || reimIdx === -1) continue;
 
@@ -517,16 +546,24 @@ export default function Step8Page() {
               const empName = String(dataRow[empNameIdx] || "").trim();
               const dept = String(dataRow[deptIdx] || "").trim();
               const reimHR = Number(dataRow[reimIdx]) || 0;
+              const unpaidHR =
+                unpaidIdx !== -1 ? Number(dataRow[unpaidIdx]) || 0 : 0;
+              const alreadyPaidHR =
+                alreadyPaidIdx !== -1 ? Number(dataRow[alreadyPaidIdx]) || 0 : 0;
 
               if (!hrReimDataMap.has(empCode)) {
                 hrReimDataMap.set(empCode, {
                   reimHR: reimHR,
+                  unpaidHR: unpaidHR,
+                  alreadyPaidHR: alreadyPaidHR,
                   name: empName,
                   dept: dept || "Staff",
                 });
               } else {
                 const existing = hrReimDataMap.get(empCode)!;
                 existing.reimHR += reimHR;
+                existing.unpaidHR += unpaidHR;
+                existing.alreadyPaidHR += alreadyPaidHR;
               }
             }
           }
@@ -535,6 +572,7 @@ export default function Step8Page() {
 
       console.log(`\n✅ Bonus data loaded: ${hrReimDataMap.size} employees`);
 
+      // ========== LOAD STAFF FILE ==========
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
 
@@ -627,6 +665,7 @@ export default function Step8Page() {
         `\n✅ Staff data extracted: ${staffEmployees.size} employees`
       );
 
+      // ========== CALCULATE GROSS SAL WITH CONDITIONAL OCTOBER ==========
       const softwareEmployeesData: Map<
         number,
         {
@@ -680,6 +719,7 @@ export default function Step8Page() {
         `\n✅ GROSS SAL calculated: ${softwareEmployeesData.size} employees`
       );
 
+      // ========== CALCULATE REIMBURSEMENT ==========
       const comparison: any[] = [];
 
       for (const [empId, softwareData] of softwareEmployeesData) {
@@ -695,16 +735,34 @@ export default function Step8Page() {
         if (customPercentageMap.has(empId)) {
           percentageForActual = customPercentageMap.get(empId)!;
           percentageSource = "Custom";
-          console.log(
-            `🎯 Emp ${empId}: Using custom percentage for ACTUAL = ${percentageForActual}%`
-          );
         } else {
           percentageForActual = calculatePercentageByMonths(monthsFromDOJ);
           percentageSource = "Calculated";
         }
 
-        const registerCalculated =
-          (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
+        // NEW: Use Adj. Gross for Register if employee is in Per sheet
+        let adjustedGrossForRegister: number;
+        let registerCalculated: number;
+
+        if (employeesInPerSheet.has(empId)) {
+          // Employee in Per sheet: use 60% of gross for register
+          adjustedGrossForRegister =
+            softwareData.grossSal * SPECIAL_GROSS_MULTIPLIER;
+          registerCalculated =
+            (adjustedGrossForRegister * REGISTER_PERCENTAGE) / 100;
+
+          console.log(
+            `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | Gross=₹${softwareData.grossSal.toFixed(
+              2
+            )} → 60%=₹${adjustedGrossForRegister.toFixed(
+              2
+            )} → Register(8.33%)=₹${registerCalculated.toFixed(2)}`
+          );
+        } else {
+          // Not in Per sheet: use full gross for register
+          adjustedGrossForRegister = softwareData.grossSal;
+          registerCalculated = (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
+        }
 
         const gross2 = calculateGross2(
           softwareData.grossSal,
@@ -716,10 +774,30 @@ export default function Step8Page() {
           percentageForActual
         );
 
-        const reimCalculated = registerCalculated - actualCalculated;
+        // Determine payment status
+        let paymentStatus = "None";
+        if (hrData) {
+          if (hrData.unpaidHR > 0) {
+            paymentStatus = "Unpaid";
+          } else if (hrData.alreadyPaidHR > 0) {
+            paymentStatus = "Already Paid";
+          }
+        }
+
+        // NEW: Set Reim(Software) to 0 if Already Paid or Unpaid
+        let reimSoftware: number;
+        if (paymentStatus === "Already Paid" || paymentStatus === "Unpaid") {
+          reimSoftware = 0;
+          console.log(
+            `🔒 Emp ${empId}: ${paymentStatus} - Reim(Software) set to 0`
+          );
+        } else {
+          reimSoftware = registerCalculated - actualCalculated;
+        }
+
         const reimHR = hrData?.reimHR || 0;
 
-        const difference = reimCalculated - reimHR;
+        const difference = reimSoftware - reimHR;
         const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
         comparison.push({
@@ -727,40 +805,28 @@ export default function Step8Page() {
           employeeName: hrData?.name || softwareData.name,
           department: hrData?.dept || softwareData.dept,
           grossSal: softwareData.grossSal,
+          adjustedGross: adjustedGrossForRegister,
           excludedOctober: softwareData.excludedOctober,
           registerPercentage: REGISTER_PERCENTAGE,
           actualPercentage: percentageForActual,
           percentageSource: percentageSource,
           registerCalculated: registerCalculated,
           actualCalculated: actualCalculated,
-          reimCalculated: reimCalculated,
+          reimSoftware: reimSoftware,
           reimHR: reimHR,
+          paymentStatus: paymentStatus,
           difference: difference,
           status: status,
         });
-
-        const octNote = softwareData.excludedOctober ? " [Oct=0]" : "";
-        const customNote = percentageSource === "Custom" ? " [Custom%]" : "";
-        console.log(
-          `✅ Emp ${empId}${octNote}${customNote}: GROSS=₹${softwareData.grossSal.toFixed(
-            2
-          )} | ` +
-            `Register(8.33%)=₹${registerCalculated.toFixed(
-              2
-            )} - Actual(${percentageForActual}%)=₹${actualCalculated.toFixed(
-              2
-            )} = ` +
-            `Reim(Calc)=₹${reimCalculated.toFixed(
-              2
-            )} | Reim(HR)=₹${reimHR.toFixed(2)} | ${status}`
-        );
       }
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("\n✅ Reimbursement calculation completed");
+      console.log(
+        "\n✅ Reimbursement calculation completed with Adj. Gross & Payment Status"
+      );
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -775,7 +841,7 @@ export default function Step8Page() {
     }
   }, [staffFile, bonusFile, actualPercentageFile]);
 
-  // 🎯 NEW: Sorting logic
+  // 🎯 Sorting logic
   useEffect(() => {
     let sorted = [...comparisonData];
 
@@ -800,7 +866,7 @@ export default function Step8Page() {
     setFilteredData(sorted);
   }, [comparisonData, sortConfig]);
 
-  // 🎯 NEW: Handle column sorting
+  // 🎯 Handle column sorting
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
 
@@ -816,7 +882,7 @@ export default function Step8Page() {
     setSortConfig({ key, direction });
   };
 
-  // 🎯 NEW: Sort icon component
+  // 🎯 Sort icon component
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     const isActive = sortConfig.key === columnKey;
 
@@ -863,14 +929,16 @@ export default function Step8Page() {
         "Employee Name": row.employeeName,
         Department: row.department,
         "GROSS SAL": row.grossSal,
+        "Adj. Gross": row.adjustedGross,
         "October Excluded": row.excludedOctober ? "Yes" : "No",
         "Register %": row.registerPercentage + "%",
         "Actual %": row.actualPercentage + "%",
         "% Source": row.percentageSource,
         "Register (Calculated)": row.registerCalculated,
         "Actual (Calculated)": row.actualCalculated,
-        "Reim (Calculated)": row.reimCalculated,
-        "Reim (HR)": row.reimHR,
+        "Reim(Software)": row.reimSoftware,
+        "Reim(HR)": row.reimHR,
+        "Payment Status": row.paymentStatus,
         Difference: row.difference,
         Status: row.status,
       }))
@@ -880,6 +948,27 @@ export default function Step8Page() {
     XLSX.utils.book_append_sheet(wb, ws, "Step8 Reimbursement");
     XLSX.writeFile(wb, `Step8-Reimbursement-Calculation.xlsx`);
   };
+
+  // ========== Calculate Grand Totals ==========
+  const calculateGrandTotals = () => {
+    const totalReimSoftware = filteredData.reduce(
+      (sum, row) => sum + (Number(row.reimSoftware) || 0),
+      0
+    );
+    const totalReimHR = filteredData.reduce(
+      (sum, row) => sum + (Number(row.reimHR) || 0),
+      0
+    );
+    const totalDifference = totalReimSoftware - totalReimHR;
+
+    return {
+      totalReimSoftware,
+      totalReimHR,
+      totalDifference,
+    };
+  };
+
+  const grandTotals = calculateGrandTotals();
 
   const FileCard = ({
     title,
@@ -972,8 +1061,8 @@ export default function Step8Page() {
                 Step 8 - Reimbursement Calculation
               </h1>
               <p className="text-gray-600 mt-2">
-                Formula: Reimbursement = Register - Actual (with custom
-                percentages)
+                Formula: Reimbursement = Register - Actual (with Adj. Gross &
+                Payment Status)
               </p>
             </div>
             <div className="flex gap-3">
@@ -997,6 +1086,8 @@ export default function Step8Page() {
               </button>
             </div>
           </div>
+
+          {/* Logic Explanation */}
           <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
             <div
               className="flex justify-between items-center p-4 cursor-pointer hover:bg-blue-100 transition-colors"
@@ -1055,26 +1146,41 @@ export default function Step8Page() {
                         October estimate
                       </li>
                       <li>
-                        <strong>Register:</strong> GROSS SAL × 8.33% (fixed for
-                        all employees)
+                        <strong>Adj. Gross:</strong> For employees in Per sheet
+                        → GROSS × 60%, others → GROSS
+                      </li>
+                      <li>
+                        <strong>Register:</strong> Adj. Gross × 8.33%
                       </li>
                       <li>
                         <strong>Actual:</strong> Calculated using custom or
                         DOJ-based percentage
                       </li>
                       <li>
-                        <strong>Reimbursement:</strong> Register - Actual
+                        <strong>Reimbursement:</strong> Register - Actual (set
+                        to 0 if Already Paid or Unpaid)
                       </li>
                     </ul>
                   </div>
 
                   <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-3">
                     <p className="font-semibold text-purple-900 mb-1">
-                      🎯 Custom Percentage (ACTUAL only):
+                      🎯 Adj. Gross Rule:
                     </p>
                     <p className="ml-4 text-purple-800">
-                      Employees in "Per" sheet use their specified percentage
-                      for <strong>ACTUAL calculation</strong>
+                      Employees in "Per" sheet use{" "}
+                      <strong>Gross × 60%</strong> for Register calculation
+                    </p>
+                  </div>
+
+                  <div className="bg-red-50 border border-red-200 rounded p-3">
+                    <p className="font-semibold text-red-900 mb-1">
+                      🔒 Payment Status Rule:
+                    </p>
+                    <p className="ml-4 text-red-800">
+                      If employee is <strong>Already Paid</strong> or{" "}
+                      <strong>Unpaid</strong>, Reim(Software) is set to{" "}
+                      <strong>0</strong>
                     </p>
                   </div>
 
@@ -1091,6 +1197,7 @@ export default function Step8Page() {
               </div>
             )}
           </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard
               title="Indiana Staff"
@@ -1100,7 +1207,7 @@ export default function Step8Page() {
             <FileCard
               title="Bonus Calculation Sheet"
               file={bonusFile}
-              description="Reim (HR) values"
+              description="Reim (HR), Unpaid, Already Paid values"
             />
             <FileCard
               title="Actual Percentage Bonus Data"
@@ -1109,6 +1216,7 @@ export default function Step8Page() {
               optional={true}
             />
           </div>
+
           {[staffFile, bonusFile].filter(Boolean).length < 2 && (
             <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1136,16 +1244,18 @@ export default function Step8Page() {
               </div>
             </div>
           )}
+
           {isProcessing && (
             <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Calculating Reimbursement with custom percentages...
+                  Calculating Reimbursement with Adj. Gross & Payment Status...
                 </p>
               </div>
             </div>
           )}
+
           {error && (
             <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1166,6 +1276,7 @@ export default function Step8Page() {
               </div>
             </div>
           )}
+
           {comparisonData.length > 0 && (
             <div className="mt-8">
               <div className="flex justify-between items-center mb-4">
@@ -1193,181 +1304,219 @@ export default function Step8Page() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <div className="max-h-[600px] overflow-y-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("employeeId")}
-                        >
-                          <div className="flex items-center">
-                            Employee ID
-                            <SortIcon columnKey="employeeId" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("employeeName")}
-                        >
-                          <div className="flex items-center">
-                            Employee Name
-                            <SortIcon columnKey="employeeName" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("department")}
-                        >
-                          <div className="flex items-center">
-                            Department
-                            <SortIcon columnKey="department" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("actualPercentage")}
-                        >
-                          <div className="flex items-center justify-center">
-                            Actual %
-                            <SortIcon columnKey="actualPercentage" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("registerCalculated")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Register (8.33%)
-                            <SortIcon columnKey="registerCalculated" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("actualCalculated")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Actual
-                            <SortIcon columnKey="actualCalculated" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("reimCalculated")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Reim (Calculated)
-                            <SortIcon columnKey="reimCalculated" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("reimHR")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Reim (HR)
-                            <SortIcon columnKey="reimHR" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("difference")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Difference
-                            <SortIcon columnKey="difference" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("status")}
-                        >
-                          <div className="flex items-center justify-center">
-                            Status
-                            <SortIcon columnKey="status" />
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredData.map((row, idx) => (
-                        <tr
-                          key={idx}
-                          className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                        >
-                          <td className="border border-gray-300 px-4 py-2">
-                            {row.employeeId}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2">
-                            {row.employeeName}
-                            {row.excludedOctober && (
-                              <span className="ml-2 text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
-                                Oct=0
-                              </span>
-                            )}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2">
-                            <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
-                              {row.department}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <span
-                                className={`px-2 py-1 rounded text-xs font-medium ${
-                                  row.actualPercentage === 10.0
-                                    ? "bg-red-100 text-red-800"
-                                    : row.actualPercentage === 12.0
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : "bg-green-100 text-green-800"
-                                }`}
-                              >
-                                {row.actualPercentage}%
-                              </span>
-                              {row.percentageSource === "Custom" && (
-                                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
-                                  Custom
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-right text-blue-600 font-medium">
-                            {formatCurrency(row.registerCalculated)}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-right text-purple-600 font-medium">
-                            {formatCurrency(row.actualCalculated)}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-right font-bold text-green-600">
-                            {formatCurrency(row.reimCalculated)}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-right font-bold text-orange-600">
-                            {formatCurrency(row.reimHR)}
-                          </td>
-                          <td
-                            className={`border border-gray-300 px-4 py-2 text-right font-medium ${
-                              Math.abs(row.difference) <= TOLERANCE
-                                ? "text-green-600"
-                                : "text-red-600"
-                            }`}
+              <div className="border border-gray-300 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <table className="w-full border-collapse">
+                      <thead className="bg-gray-100 sticky top-0 z-10">
+                        <tr>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("employeeId")}
                           >
-                            {formatCurrency(row.difference)}
-                          </td>
-                          <td className="border border-gray-300 px-4 py-2 text-center">
-                            <span
-                              className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                row.status === "Match"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
+                            <div className="flex items-center">
+                              Employee ID
+                              <SortIcon columnKey="employeeId" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("employeeName")}
+                          >
+                            <div className="flex items-center">
+                              Employee Name
+                              <SortIcon columnKey="employeeName" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("department")}
+                          >
+                            <div className="flex items-center">
+                              Department
+                              <SortIcon columnKey="department" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("actualPercentage")}
+                          >
+                            <div className="flex items-center justify-center">
+                              Actual %
+                              <SortIcon columnKey="actualPercentage" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("registerCalculated")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Register (8.33%)
+                              <SortIcon columnKey="registerCalculated" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("actualCalculated")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Actual
+                              <SortIcon columnKey="actualCalculated" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("reimSoftware")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Reim(Software)
+                              <SortIcon columnKey="reimSoftware" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("reimHR")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Reim(HR)
+                              <SortIcon columnKey="reimHR" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-right cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("difference")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Difference
+                              <SortIcon columnKey="difference" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-4 py-2 text-center cursor-pointer hover:bg-gray-200 select-none bg-gray-100"
+                            onClick={() => handleSort("status")}
+                          >
+                            <div className="flex items-center justify-center">
+                              Status
+                              <SortIcon columnKey="status" />
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                          >
+                            <td className="border border-gray-300 px-4 py-2">
+                              {row.employeeId}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              <div className="flex items-center gap-2">
+                                <span>{row.employeeName}</span>
+                                {row.excludedOctober && (
+                                  <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
+                                    Oct=0
+                                  </span>
+                                )}
+                                {row.paymentStatus === "Already Paid" && (
+                                  <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded font-medium">
+                                    Already Paid
+                                  </span>
+                                )}
+                                {row.paymentStatus === "Unpaid" && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                                    Unpaid
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">
+                                {row.department}
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`px-2 py-1 rounded text-xs font-medium ${
+                                    row.actualPercentage === 10.0
+                                      ? "bg-red-100 text-red-800"
+                                      : row.actualPercentage === 12.0
+                                      ? "bg-yellow-100 text-yellow-800"
+                                      : "bg-green-100 text-green-800"
+                                  }`}
+                                >
+                                  {row.actualPercentage}%
+                                </span>
+                                {row.percentageSource === "Custom" && (
+                                  <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                    Custom
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right text-blue-600 font-medium">
+                              {formatCurrency(row.registerCalculated)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right text-purple-600 font-medium">
+                              {formatCurrency(row.actualCalculated)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right font-bold text-green-600">
+                              {formatCurrency(row.reimSoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right font-bold text-orange-600">
+                              {formatCurrency(row.reimHR)}
+                            </td>
+                            <td
+                              className={`border border-gray-300 px-4 py-2 text-right font-medium ${
+                                Math.abs(row.difference) <= TOLERANCE
+                                  ? "text-green-600"
+                                  : "text-red-600"
                               }`}
                             >
-                              {row.status}
+                              {formatCurrency(row.difference)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <span
+                                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                  row.status === "Match"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+
+                        {/* ========== GRAND TOTAL ROW ========== */}
+                        <tr className="bg-purple-100 font-bold sticky bottom-0">
+                          <td
+                            colSpan={6}
+                            className="border border-gray-300 px-4 py-3 text-right"
+                          >
+                            <span className="text-lg">GRAND TOTAL</span>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                            {formatCurrency(grandTotals.totalReimSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                            {formatCurrency(grandTotals.totalReimHR)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+                            {formatCurrency(grandTotals.totalDifference)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-center">
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                              Match
                             </span>
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
@@ -1377,7 +1526,18 @@ export default function Step8Page() {
                   Matches:{" "}
                   {filteredData.filter((r) => r.status === "Match").length} |
                   Mismatches:{" "}
-                  {filteredData.filter((r) => r.status === "Mismatch").length}
+                  {filteredData.filter((r) => r.status === "Mismatch").length} |
+                  Already Paid:{" "}
+                  {
+                    filteredData.filter(
+                      (r) => r.paymentStatus === "Already Paid"
+                    ).length
+                  }{" "}
+                  | Unpaid:{" "}
+                  {
+                    filteredData.filter((r) => r.paymentStatus === "Unpaid")
+                      .length
+                  }
                 </div>
               </div>
             </div>

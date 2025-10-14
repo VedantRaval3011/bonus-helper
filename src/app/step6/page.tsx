@@ -69,6 +69,8 @@ export default function Step6Page() {
             registerHR: r.registerHR,
             unpaidSoftware: r.unpaidSoftware,
             unpaidHR: r.unpaidHR,
+            alreadyPaidSoftware: r.alreadyPaidSoftware,
+            alreadyPaidHR: r.alreadyPaidHR,
             hrOccurrences: r.hrOccurrences,
             diff: r.difference,
             status: r.status,
@@ -110,6 +112,12 @@ export default function Step6Page() {
       staffRows.map((r) => Number(r.unpaidSoftware || 0))
     );
     const staffUnpaidHRSum = sum(staffRows.map((r) => Number(r.unpaidHR || 0)));
+    const staffAlreadyPaidSWSum = sum(
+      staffRows.map((r) => Number(r.alreadyPaidSoftware || 0))
+    );
+    const staffAlreadyPaidHRSum = sum(
+      staffRows.map((r) => Number(r.alreadyPaidHR || 0))
+    );
 
     const workerRegSWSum = sum(
       workerRows.map((r) => Number(r.registerSoftware || 0))
@@ -122,6 +130,12 @@ export default function Step6Page() {
     );
     const workerUnpaidHRSum = sum(
       workerRows.map((r) => Number(r.unpaidHR || 0))
+    );
+    const workerAlreadyPaidSWSum = sum(
+      workerRows.map((r) => Number(r.alreadyPaidSoftware || 0))
+    );
+    const workerAlreadyPaidHRSum = sum(
+      workerRows.map((r) => Number(r.alreadyPaidHR || 0))
     );
 
     return {
@@ -148,6 +162,8 @@ export default function Step6Page() {
           registerHRSum: staffRegHRSum,
           unpaidSWSum: staffUnpaidSWSum,
           unpaidHRSum: staffUnpaidHRSum,
+          alreadyPaidSWSum: staffAlreadyPaidSWSum,
+          alreadyPaidHRSum: staffAlreadyPaidHRSum,
         },
         worker: {
           count: workerRows.length,
@@ -156,6 +172,8 @@ export default function Step6Page() {
           registerHRSum: workerRegHRSum,
           unpaidSWSum: workerUnpaidSWSum,
           unpaidHRSum: workerUnpaidHRSum,
+          alreadyPaidSWSum: workerAlreadyPaidSWSum,
+          alreadyPaidHRSum: workerAlreadyPaidHRSum,
         },
       },
     };
@@ -183,7 +201,7 @@ export default function Step6Page() {
         (r) =>
           `${r.employeeId}|${r.department}|${Number(r.unpaidSoftware) || 0}|${
             Number(r.unpaidHR) || 0
-          }|${Number(r.difference) || 0}|${r.status}|${r.isEligible}`
+          }|${Number(r.alreadyPaidSoftware) || 0}|${Number(r.alreadyPaidHR) || 0}|${Number(r.difference) || 0}|${r.status}|${r.isEligible}`
       )
       .join(";");
     return djb2Hash(sig);
@@ -454,7 +472,7 @@ export default function Step6Page() {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 6: Unpaid Verification (with 0 vs Blank handling)");
+      console.log("📊 STEP 6: Unpaid Verification (with Already Paid section)");
       console.log("=".repeat(60));
       console.log(
         `✅ Reference Date: ${
@@ -520,6 +538,7 @@ export default function Step6Page() {
         `✅ Special percentage employees: ${specialPercentageEmployees.size}`
       );
 
+      // 🎯 Load Already Paid (Software) from Due Voucher file column F - ONLY FOR STAFF
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
       const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
       const dueVoucherSheet =
@@ -530,6 +549,7 @@ export default function Step6Page() {
       );
 
       const dueVCMap: Map<number, number> = new Map();
+      const alreadyPaidSoftwareMap: Map<number, number> = new Map();
       let dueVCHeaderRow = -1;
 
       for (let i = 0; i < Math.min(10, dueVoucherData.length); i++) {
@@ -553,6 +573,8 @@ export default function Step6Page() {
         const dueVCIdx = headers.findIndex((h: any) =>
           /DUE.*VC|DUEVC/i.test(norm(h))
         );
+        // Column F (index 5) for Already Paid (Software)
+        const alreadyPaidIdx = 5;
 
         if (empCodeIdx !== -1 && dueVCIdx !== -1) {
           for (let i = dueVCHeaderRow + 1; i < dueVoucherData.length; i++) {
@@ -561,15 +583,19 @@ export default function Step6Page() {
 
             const empCode = Number(row[empCodeIdx]);
             const dueVC = Number(row[dueVCIdx]) || 0;
+            const alreadyPaid = Number(row[alreadyPaidIdx]) || 0;
 
             if (empCode && !isNaN(empCode)) {
               dueVCMap.set(empCode, dueVC);
+              // Store already paid for all employees (will filter by department later)
+              alreadyPaidSoftwareMap.set(empCode, alreadyPaid);
             }
           }
         }
       }
 
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
+      console.log(`✅ Already Paid (Software) data loaded: ${alreadyPaidSoftwareMap.size} employees`);
 
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
@@ -579,11 +605,13 @@ export default function Step6Page() {
         {
           unpaidHR: number;
           registerHR: number;
+          alreadyPaidHR: number;
           dept: string;
           occurrences: number;
         }
       > = new Map();
 
+      // 🎯 Process Worker sheet (first sheet) - DON'T store Already Paid for Workers
       if (bonusWorkbook.SheetNames.length > 0) {
         const workerSheetName = bonusWorkbook.SheetNames[0];
         console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
@@ -629,21 +657,26 @@ export default function Step6Page() {
             const empCode = Number(row[empCodeIdx]);
             const registerHR = Number(row[registerIdx]) || 0;
             const unpaidHR = Number(row[dueVCIdx]) || 0;
+            // 🎯 CHANGED: Always set Already Paid to 0 for Workers
+            const alreadyPaidHR = 0;
 
             if (empCode && !isNaN(empCode)) {
               if (hrUnpaidData.has(empCode)) {
                 const existing = hrUnpaidData.get(empCode)!;
                 existing.registerHR += registerHR;
                 existing.unpaidHR += unpaidHR;
+                // alreadyPaidHR remains 0 for workers
                 existing.occurrences += 1;
                 console.log(
                   `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(
                     2
                   )}, Unpaid: ₹${unpaidHR.toFixed(
                     2
-                  )}, Total Register: ₹${existing.registerHR.toFixed(
+                  )}, Already Paid: ₹0.00 (Worker - always zero), Total Register: ₹${existing.registerHR.toFixed(
                     2
-                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${
+                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(
+                    2
+                  )}, Total Already Paid: ₹0.00 (${
                     existing.occurrences
                   } occurrences)`
                 );
@@ -651,6 +684,7 @@ export default function Step6Page() {
                 hrUnpaidData.set(empCode, {
                   registerHR: registerHR,
                   unpaidHR: unpaidHR,
+                  alreadyPaidHR: 0, // Always 0 for workers
                   dept: "Worker",
                   occurrences: 1,
                 });
@@ -660,6 +694,7 @@ export default function Step6Page() {
         }
       }
 
+      // 🎯 Process Staff sheet (second sheet) - Store Already Paid for Staff
       if (bonusWorkbook.SheetNames.length > 1) {
         const staffSheetName = bonusWorkbook.SheetNames[1];
         console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
@@ -689,6 +724,8 @@ export default function Step6Page() {
           );
           const registerIdx = 19;
           const unpaidIdx = 21;
+          // Column W (index 22) for Already Paid (HR) in Staff sheet
+          const alreadyPaidIdx = 22;
 
           for (let i = staffHeaderRow + 1; i < staffData.length; i++) {
             const row = staffData[i];
@@ -697,21 +734,27 @@ export default function Step6Page() {
             const empCode = Number(row[empCodeIdx]);
             const registerHR = Number(row[registerIdx]) || 0;
             const unpaidHR = Number(row[unpaidIdx]) || 0;
+            const alreadyPaidHR = Number(row[alreadyPaidIdx]) || 0;
 
             if (empCode && !isNaN(empCode)) {
               if (hrUnpaidData.has(empCode)) {
                 const existing = hrUnpaidData.get(empCode)!;
                 existing.registerHR += registerHR;
                 existing.unpaidHR += unpaidHR;
+                existing.alreadyPaidHR += alreadyPaidHR;
                 existing.occurrences += 1;
                 console.log(
                   `🔄 Staff Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(
                     2
                   )}, Unpaid: ₹${unpaidHR.toFixed(
                     2
+                  )}, Already Paid: ₹${alreadyPaidHR.toFixed(
+                    2
                   )}, Total Register: ₹${existing.registerHR.toFixed(
                     2
-                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(2)} (${
+                  )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(
+                    2
+                  )}, Total Already Paid: ₹${existing.alreadyPaidHR.toFixed(2)} (${
                     existing.occurrences
                   } occurrences)`
                 );
@@ -719,6 +762,7 @@ export default function Step6Page() {
                 hrUnpaidData.set(empCode, {
                   registerHR: registerHR,
                   unpaidHR: unpaidHR,
+                  alreadyPaidHR: alreadyPaidHR,
                   dept: "Staff",
                   occurrences: 1,
                 });
@@ -834,7 +878,6 @@ export default function Step6Page() {
             .trim()
             .toUpperCase();
 
-          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
 
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
@@ -852,10 +895,8 @@ export default function Step6Page() {
 
           const emp = staffEmployees.get(empId)!;
 
-          // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
-            // If we already have data for this month, add to it
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
                 hasValue: true,
@@ -863,7 +904,6 @@ export default function Step6Page() {
               });
             }
           } else {
-            // First time seeing this month for this employee
             emp.months.set(monthKey, salary1Result);
           }
         }
@@ -955,7 +995,6 @@ export default function Step6Page() {
             .trim()
             .toUpperCase();
 
-          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
 
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
@@ -982,10 +1021,8 @@ export default function Step6Page() {
 
           const emp = workerEmployees.get(empId)!;
 
-          // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
-            // If we already have data for this month, add to it
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
                 hasValue: true,
@@ -993,7 +1030,6 @@ export default function Step6Page() {
               });
             }
           } else {
-            // First time seeing this month for this employee
             emp.months.set(monthKey, salary1Result);
           }
         }
@@ -1006,7 +1042,6 @@ export default function Step6Page() {
         { name: string; dept: string; grossSalary: number; dateOfJoining: any }
       > = new Map();
 
-      // 🎯 NEW: Updated folding logic to handle hasValue flag
       const foldMonthly = (
         src: Map<
           number,
@@ -1022,7 +1057,6 @@ export default function Step6Page() {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
 
-          // 🎯 NEW: Only include months where hasValue is true
           for (const mk of AVG_WINDOW) {
             const cellData = rec.months.get(mk);
             if (cellData && cellData.hasValue) {
@@ -1098,9 +1132,14 @@ export default function Step6Page() {
           unpaidSoftware = registerSoftware;
         }
 
+        // 🎯 CHANGED: Set Already Paid (Software) to 0 for Workers, use actual value for Staff
+        const alreadyPaidSoftware = empData.dept === "Worker" ? 0 : (alreadyPaidSoftwareMap.get(empId) || 0);
+
         const hrData = hrUnpaidData.get(empId);
         const registerHR = hrData?.registerHR || 0;
         const unpaidHR = hrData?.unpaidHR || 0;
+        // 🎯 CHANGED: Already set to 0 for Workers in hrUnpaidData, so this will be 0 for Workers
+        const alreadyPaidHR = hrData?.alreadyPaidHR || 0;
         const occurrences = hrData?.occurrences || 0;
 
         const difference = unpaidSoftware - unpaidHR;
@@ -1128,6 +1167,8 @@ export default function Step6Page() {
           registerHR: registerHR,
           unpaidSoftware: unpaidSoftware,
           unpaidHR: unpaidHR,
+          alreadyPaidSoftware: alreadyPaidSoftware,
+          alreadyPaidHR: alreadyPaidHR,
           hrOccurrences: occurrences,
           difference: difference,
           status: status,
@@ -1276,6 +1317,8 @@ export default function Step6Page() {
         "HR Occurrences": row.hrOccurrences,
         "Unpaid (Software)": row.unpaidSoftware,
         "Unpaid (HR)": row.unpaidHR,
+        "Already Paid (Software)": row.alreadyPaidSoftware,
+        "Already Paid (HR)": row.alreadyPaidHR,
         Difference: row.difference,
         Status: row.status,
         "Validation Error": row.validationError || "",
@@ -1286,7 +1329,7 @@ export default function Step6Page() {
     XLSX.utils.book_append_sheet(wb, ws, "Unpaid Verification");
     XLSX.writeFile(
       wb,
-      `Step6-Unpaid-Verification-CORRECTED-${departmentFilter}-${eligibilityFilter}.xlsx`
+      `Step6-Unpaid-Verification-with-AlreadyPaid-${departmentFilter}-${eligibilityFilter}.xlsx`
     );
   };
 
@@ -1359,7 +1402,7 @@ export default function Step6Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-100 py-5 px-4">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -1403,7 +1446,7 @@ export default function Step6Page() {
             <FileCard
               title="Bonus Calculation Sheet"
               file={bonusFile}
-              description="Register & Unpaid (HR): Worker Col T, Staff Col V"
+              description="Register, Unpaid & Already Paid (HR - Staff only): Worker Col T,U | Staff Col V,W,X"
             />
             <FileCard
               title="Actual Percentage Data"
@@ -1413,7 +1456,7 @@ export default function Step6Page() {
             <FileCard
               title="Due Voucher List"
               file={dueVoucherFile}
-              description="DUE VC values for Unpaid (Software)"
+              description="DUE VC & Already Paid (Software - Staff only) - Col F"
             />
           </div>
 
@@ -1456,7 +1499,7 @@ export default function Step6Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing with 0 vs blank handling...
+                  Processing with Already Paid section (Staff only - Workers are zero)...
                 </p>
               </div>
             </div>
@@ -1636,6 +1679,24 @@ export default function Step6Page() {
                         </th>
                         <th
                           className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("alreadyPaidSoftware")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Already Paid (SW)
+                            <SortIcon columnKey="alreadyPaidSoftware" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                          onClick={() => handleSort("alreadyPaidHR")}
+                        >
+                          <div className="flex items-center justify-end">
+                            Already Paid (HR)
+                            <SortIcon columnKey="alreadyPaidHR" />
+                          </div>
+                        </th>
+                        <th
+                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
                           onClick={() => handleSort("difference")}
                         >
                           <div className="flex items-center justify-end">
@@ -1720,6 +1781,12 @@ export default function Step6Page() {
                           </td>
                           <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
                             {formatCurrency(row.unpaidHR)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-green-600">
+                            {formatCurrency(row.alreadyPaidSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-teal-600">
+                            {formatCurrency(row.alreadyPaidHR)}
                           </td>
                           <td
                             className={`border border-gray-300 px-3 py-2 text-right font-medium ${
