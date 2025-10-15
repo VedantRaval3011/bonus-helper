@@ -223,7 +223,6 @@ export default function Step6Page() {
       buildStep6SummaryMessage(comparisonData),
       ...buildStep6MismatchMessages(comparisonData),
     ];
-
     postAuditMessagesStep6(items, deterministicBatchId).catch((err) => {
       console.error("Auto-audit step6 failed", err);
       sessionStorage.removeItem(markerKey);
@@ -538,7 +537,7 @@ export default function Step6Page() {
         `✅ Special percentage employees: ${specialPercentageEmployees.size}`
       );
 
-      // 🎯 Load Already Paid (Software) from Due Voucher file column F - ONLY FOR STAFF
+      // 🎯 NEW: Load Already Paid (Software) from Due Voucher file column F
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
       const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
       const dueVoucherSheet =
@@ -573,7 +572,7 @@ export default function Step6Page() {
         const dueVCIdx = headers.findIndex((h: any) =>
           /DUE.*VC|DUEVC/i.test(norm(h))
         );
-        // Column F (index 5) for Already Paid (Software)
+        // 🎯 NEW: Column F (index 5) for Already Paid (Software)
         const alreadyPaidIdx = 5;
 
         if (empCodeIdx !== -1 && dueVCIdx !== -1) {
@@ -587,7 +586,6 @@ export default function Step6Page() {
 
             if (empCode && !isNaN(empCode)) {
               dueVCMap.set(empCode, dueVC);
-              // Store already paid for all employees (will filter by department later)
               alreadyPaidSoftwareMap.set(empCode, alreadyPaid);
             }
           }
@@ -611,7 +609,7 @@ export default function Step6Page() {
         }
       > = new Map();
 
-      // 🎯 Process Worker sheet (first sheet) - DON'T store Already Paid for Workers
+      // 🎯 Process Worker sheet (first sheet)
       if (bonusWorkbook.SheetNames.length > 0) {
         const workerSheetName = bonusWorkbook.SheetNames[0];
         console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
@@ -650,6 +648,9 @@ export default function Step6Page() {
             dueVCIdx = 19;
           }
 
+          // 🎯 NEW: Column W (index 22) for Already Paid (HR) in Worker sheet
+          const alreadyPaidIdx = 22;
+
           for (let i = workerHeaderRow + 1; i < workerData.length; i++) {
             const row = workerData[i];
             if (!row || row.length === 0) continue;
@@ -657,26 +658,27 @@ export default function Step6Page() {
             const empCode = Number(row[empCodeIdx]);
             const registerHR = Number(row[registerIdx]) || 0;
             const unpaidHR = Number(row[dueVCIdx]) || 0;
-            // 🎯 CHANGED: Always set Already Paid to 0 for Workers
-            const alreadyPaidHR = 0;
+            const alreadyPaidHR = Number(row[alreadyPaidIdx]) || 0;
 
             if (empCode && !isNaN(empCode)) {
               if (hrUnpaidData.has(empCode)) {
                 const existing = hrUnpaidData.get(empCode)!;
                 existing.registerHR += registerHR;
                 existing.unpaidHR += unpaidHR;
-                // alreadyPaidHR remains 0 for workers
+                existing.alreadyPaidHR += alreadyPaidHR;
                 existing.occurrences += 1;
                 console.log(
                   `🔄 Worker Emp ${empCode}: Duplicate found - Adding Register: ₹${registerHR.toFixed(
                     2
                   )}, Unpaid: ₹${unpaidHR.toFixed(
                     2
-                  )}, Already Paid: ₹0.00 (Worker - always zero), Total Register: ₹${existing.registerHR.toFixed(
+                  )}, Already Paid: ₹${alreadyPaidHR.toFixed(
+                    2
+                  )}, Total Register: ₹${existing.registerHR.toFixed(
                     2
                   )}, Total Unpaid: ₹${existing.unpaidHR.toFixed(
                     2
-                  )}, Total Already Paid: ₹0.00 (${
+                  )}, Total Already Paid: ₹${existing.alreadyPaidHR.toFixed(2)} (${
                     existing.occurrences
                   } occurrences)`
                 );
@@ -684,7 +686,7 @@ export default function Step6Page() {
                 hrUnpaidData.set(empCode, {
                   registerHR: registerHR,
                   unpaidHR: unpaidHR,
-                  alreadyPaidHR: 0, // Always 0 for workers
+                  alreadyPaidHR: alreadyPaidHR,
                   dept: "Worker",
                   occurrences: 1,
                 });
@@ -694,7 +696,7 @@ export default function Step6Page() {
         }
       }
 
-      // 🎯 Process Staff sheet (second sheet) - Store Already Paid for Staff
+      // 🎯 Process Staff sheet (second sheet)
       if (bonusWorkbook.SheetNames.length > 1) {
         const staffSheetName = bonusWorkbook.SheetNames[1];
         console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
@@ -724,7 +726,7 @@ export default function Step6Page() {
           );
           const registerIdx = 19;
           const unpaidIdx = 21;
-          // Column W (index 22) for Already Paid (HR) in Staff sheet
+          // 🎯 NEW: Column W (index 22) for Already Paid (HR) in Staff sheet
           const alreadyPaidIdx = 22;
 
           for (let i = staffHeaderRow + 1; i < staffData.length; i++) {
@@ -878,6 +880,7 @@ export default function Step6Page() {
             .trim()
             .toUpperCase();
 
+          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
 
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
@@ -895,8 +898,10 @@ export default function Step6Page() {
 
           const emp = staffEmployees.get(empId)!;
 
+          // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
+            // If we already have data for this month, add to it
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
                 hasValue: true,
@@ -904,6 +909,7 @@ export default function Step6Page() {
               });
             }
           } else {
+            // First time seeing this month for this employee
             emp.months.set(monthKey, salary1Result);
           }
         }
@@ -995,6 +1001,7 @@ export default function Step6Page() {
             .trim()
             .toUpperCase();
 
+          // 🎯 NEW: Use getCellValue to distinguish 0 from blank
           const salary1Result = getCellValue(row[salary1Idx]);
 
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
@@ -1021,8 +1028,10 @@ export default function Step6Page() {
 
           const emp = workerEmployees.get(empId)!;
 
+          // 🎯 NEW: Store the cell data with hasValue flag
           const existing = emp.months.get(monthKey);
           if (existing) {
+            // If we already have data for this month, add to it
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
                 hasValue: true,
@@ -1030,6 +1039,7 @@ export default function Step6Page() {
               });
             }
           } else {
+            // First time seeing this month for this employee
             emp.months.set(monthKey, salary1Result);
           }
         }
@@ -1042,6 +1052,7 @@ export default function Step6Page() {
         { name: string; dept: string; grossSalary: number; dateOfJoining: any }
       > = new Map();
 
+      // 🎯 NEW: Updated folding logic to handle hasValue flag
       const foldMonthly = (
         src: Map<
           number,
@@ -1057,6 +1068,7 @@ export default function Step6Page() {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
 
+          // 🎯 NEW: Only include months where hasValue is true
           for (const mk of AVG_WINDOW) {
             const cellData = rec.months.get(mk);
             if (cellData && cellData.hasValue) {
@@ -1132,13 +1144,12 @@ export default function Step6Page() {
           unpaidSoftware = registerSoftware;
         }
 
-        // 🎯 CHANGED: Set Already Paid (Software) to 0 for Workers, use actual value for Staff
-        const alreadyPaidSoftware = empData.dept === "Worker" ? 0 : (alreadyPaidSoftwareMap.get(empId) || 0);
+        // 🎯 NEW: Get Already Paid values
+        const alreadyPaidSoftware = alreadyPaidSoftwareMap.get(empId) || 0;
 
         const hrData = hrUnpaidData.get(empId);
         const registerHR = hrData?.registerHR || 0;
         const unpaidHR = hrData?.unpaidHR || 0;
-        // 🎯 CHANGED: Already set to 0 for Workers in hrUnpaidData, so this will be 0 for Workers
         const alreadyPaidHR = hrData?.alreadyPaidHR || 0;
         const occurrences = hrData?.occurrences || 0;
 
@@ -1402,7 +1413,7 @@ export default function Step6Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-100 py-5 px-4">
-      <div className="mx-auto max-w-full">
+      <div className="max-w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -1446,7 +1457,7 @@ export default function Step6Page() {
             <FileCard
               title="Bonus Calculation Sheet"
               file={bonusFile}
-              description="Register, Unpaid & Already Paid (HR - Staff only): Worker Col T,U | Staff Col V,W,X"
+              description="Register, Unpaid & Already Paid (HR): Worker Col T,U,W | Staff Col V,W,X"
             />
             <FileCard
               title="Actual Percentage Data"
@@ -1456,7 +1467,7 @@ export default function Step6Page() {
             <FileCard
               title="Due Voucher List"
               file={dueVoucherFile}
-              description="DUE VC & Already Paid (Software - Staff only) - Col F"
+              description="DUE VC & Already Paid (Software) - Col F"
             />
           </div>
 
@@ -1499,7 +1510,7 @@ export default function Step6Page() {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Processing with Already Paid section (Staff only - Workers are zero)...
+                  Processing with Already Paid section...
                 </p>
               </div>
             </div>
@@ -1573,248 +1584,292 @@ export default function Step6Page() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <div className="max-h-[600px] overflow-y-auto">
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("employeeId")}
-                        >
-                          <div className="flex items-center">
-                            Emp ID
-                            <SortIcon columnKey="employeeId" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("employeeName")}
-                        >
-                          <div className="flex items-center">
-                            Name
-                            <SortIcon columnKey="employeeName" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("department")}
-                        >
-                          <div className="flex items-center">
-                            Dept
-                            <SortIcon columnKey="department" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("monthsOfService")}
-                        >
-                          <div className="flex items-center justify-center">
-                            MOS
-                            <SortIcon columnKey="monthsOfService" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("isEligible")}
-                        >
-                          <div className="flex items-center justify-center">
-                            Eligible
-                            <SortIcon columnKey="isEligible" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("percentage")}
-                        >
-                          <div className="flex items-center justify-center">
-                            %
-                            <SortIcon columnKey="percentage" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("grossSalarySoftware")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Gross (SW)
-                            <SortIcon columnKey="grossSalarySoftware" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("registerSoftware")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Register (SW)
-                            <SortIcon columnKey="registerSoftware" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("registerHR")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Register (HR)
-                            <SortIcon columnKey="registerHR" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("unpaidSoftware")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Unpaid (SW)
-                            <SortIcon columnKey="unpaidSoftware" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("unpaidHR")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Unpaid (HR)
-                            <SortIcon columnKey="unpaidHR" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("alreadyPaidSoftware")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Already Paid (SW)
-                            <SortIcon columnKey="alreadyPaidSoftware" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("alreadyPaidHR")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Already Paid (HR)
-                            <SortIcon columnKey="alreadyPaidHR" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("difference")}
-                        >
-                          <div className="flex items-center justify-end">
-                            Diff
-                            <SortIcon columnKey="difference" />
-                          </div>
-                        </th>
-                        <th
-                          className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
-                          onClick={() => handleSort("status")}
-                        >
-                          <div className="flex items-center justify-center">
-                            Status
-                            <SortIcon columnKey="status" />
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredData.map((row, idx) => (
-                        <tr
-                          key={idx}
-                          className={`${
-                            idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                          } ${row.validationError ? "bg-red-50" : ""} ${
-                            row.hrOccurrences > 1 ? "bg-yellow-50" : ""
-                          }`}
-                        >
-                          <td className="border border-gray-300 px-3 py-2">
-                            {row.employeeId}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2">
-                            {row.employeeName}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.department === "Staff"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-purple-100 text-purple-800"
-                              }`}
-                            >
-                              {row.department}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            {row.monthsOfService || 0}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.isEligible
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {row.isEligible ? "YES" : "NO"}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-medium ${
-                                row.percentage === 12.0
-                                  ? "bg-yellow-100 text-yellow-800"
-                                  : "bg-gray-100 text-gray-800"
-                              }`}
-                            >
-                              {row.percentage}%
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.grossSalarySoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.registerSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right">
-                            {formatCurrency(row.registerHR)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
-                            {formatCurrency(row.unpaidSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
-                            {formatCurrency(row.unpaidHR)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-green-600">
-                            {formatCurrency(row.alreadyPaidSoftware)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-right font-medium text-teal-600">
-                            {formatCurrency(row.alreadyPaidHR)}
-                          </td>
-                          <td
-                            className={`border border-gray-300 px-3 py-2 text-right font-medium ${
-                              Math.abs(row.difference) <= TOLERANCE
-                                ? "text-green-600"
-                                : "text-red-600"
+              {/* 🎯 NEW: Wrapper with relative positioning for sticky footer */}
+              <div className="relative">
+                <div className="overflow-x-auto">
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead className="sticky top-0 bg-gray-100 z-10">
+                        <tr className="bg-gray-100">
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("employeeId")}
+                          >
+                            <div className="flex items-center">
+                              Emp ID
+                              <SortIcon columnKey="employeeId" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("employeeName")}
+                          >
+                            <div className="flex items-center">
+                              Name
+                              <SortIcon columnKey="employeeName" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("department")}
+                          >
+                            <div className="flex items-center">
+                              Dept
+                              <SortIcon columnKey="department" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("monthsOfService")}
+                          >
+                            <div className="flex items-center justify-center">
+                              MOS
+                              <SortIcon columnKey="monthsOfService" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("isEligible")}
+                          >
+                            <div className="flex items-center justify-center">
+                              Eligible
+                              <SortIcon columnKey="isEligible" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("percentage")}
+                          >
+                            <div className="flex items-center justify-center">
+                              %
+                              <SortIcon columnKey="percentage" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("grossSalarySoftware")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Gross (SW)
+                              <SortIcon columnKey="grossSalarySoftware" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("registerSoftware")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Register (SW)
+                              <SortIcon columnKey="registerSoftware" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("registerHR")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Register (HR)
+                              <SortIcon columnKey="registerHR" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("unpaidSoftware")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Unpaid (SW)
+                              <SortIcon columnKey="unpaidSoftware" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("unpaidHR")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Unpaid (HR)
+                              <SortIcon columnKey="unpaidHR" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("alreadyPaidSoftware")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Already Paid (SW)
+                              <SortIcon columnKey="alreadyPaidSoftware" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("alreadyPaidHR")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Already Paid (HR)
+                              <SortIcon columnKey="alreadyPaidHR" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("difference")}
+                          >
+                            <div className="flex items-center justify-end">
+                              Diff
+                              <SortIcon columnKey="difference" />
+                            </div>
+                          </th>
+                          <th
+                            className="border border-gray-300 px-3 py-2 text-center cursor-pointer hover:bg-gray-200 select-none"
+                            onClick={() => handleSort("status")}
+                          >
+                            <div className="flex items-center justify-center">
+                              Status
+                              <SortIcon columnKey="status" />
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            className={`${
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            } ${row.validationError ? "bg-red-50" : ""} ${
+                              row.hrOccurrences > 1 ? "bg-yellow-50" : ""
                             }`}
                           >
-                            {formatCurrency(row.difference)}
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-center">
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                row.status === "Match"
-                                  ? "bg-green-100 text-green-800"
-                                  : row.status === "Error"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-orange-100 text-orange-800"
+                            <td className="border border-gray-300 px-3 py-2">
+                              {row.employeeId}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2">
+                              {row.employeeName}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.department === "Staff"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-purple-100 text-purple-800"
+                                }`}
+                              >
+                                {row.department}
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-center">
+                              {row.monthsOfService || 0}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-center">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.isEligible
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {row.isEligible ? "YES" : "NO"}
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-center">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.percentage === 12.0
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-gray-100 text-gray-800"
+                                }`}
+                              >
+                                {row.percentage}%
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right">
+                              {formatCurrency(row.grossSalarySoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right">
+                              {formatCurrency(row.registerSoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right">
+                              {formatCurrency(row.registerHR)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right font-medium text-blue-600">
+                              {formatCurrency(row.unpaidSoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right font-medium text-purple-600">
+                              {formatCurrency(row.unpaidHR)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right font-medium text-green-600">
+                              {formatCurrency(row.alreadyPaidSoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-right font-medium text-teal-600">
+                              {formatCurrency(row.alreadyPaidHR)}
+                            </td>
+                            <td
+                              className={`border border-gray-300 px-3 py-2 text-right font-medium ${
+                                Math.abs(row.difference) <= TOLERANCE
+                                  ? "text-green-600"
+                                  : "text-red-600"
                               }`}
-                              title={row.validationError || ""}
                             >
-                              {row.status}
-                            </span>
+                              {formatCurrency(row.difference)}
+                            </td>
+                            <td className="border border-gray-300 px-3 py-2 text-center">
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                  row.status === "Match"
+                                    ? "bg-green-100 text-green-800"
+                                    : row.status === "Error"
+                                    ? "bg-red-100 text-red-800"
+                                    : "bg-orange-100 text-orange-800"
+                                }`}
+                                title={row.validationError || ""}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {/* 🎯 NEW: Sticky Grand Total Footer inside tfoot */}
+                      <tfoot className="sticky bottom-0 bg-yellow-100 z-10">
+                        <tr className="font-bold border-t-4 border-yellow-600">
+                          <td colSpan={9} className="border border-gray-300 px-3 py-3 text-right bg-yellow-100">
+                            GRAND TOTAL:
                           </td>
+                          <td className="border border-gray-300 px-3 py-3 text-right text-blue-700 bg-yellow-100">
+                            {formatCurrency(
+                              filteredData.reduce(
+                                (sum, row) => sum + (row.unpaidSoftware || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-3 text-right text-purple-700 bg-yellow-100">
+                            {formatCurrency(
+                              filteredData.reduce(
+                                (sum, row) => sum + (row.unpaidHR || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-3 text-right text-green-700 bg-yellow-100">
+                            {formatCurrency(
+                              filteredData.reduce(
+                                (sum, row) => sum + (row.alreadyPaidSoftware || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td className="border border-gray-300 px-3 py-3 text-right text-teal-700 bg-yellow-100">
+                            {formatCurrency(
+                              filteredData.reduce(
+                                (sum, row) => sum + (row.alreadyPaidHR || 0),
+                                0
+                              )
+                            )}
+                          </td>
+                          <td colSpan={2} className="border border-gray-300 bg-yellow-100"></td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
               </div>
 

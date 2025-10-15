@@ -38,6 +38,9 @@ export default function Step8Page() {
         !!s.file &&
         /bonus.*final.*calculation|bonus.*2024-25/i.test(s.file.name)
     );
+  const dueVoucherFile =
+    pickFile((s) => s.type === "Due-Voucher-List") ??
+    pickFile((s) => !!s.file && /due.*voucher/i.test(s.file.name));
 
   const actualPercentageFile =
     pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??
@@ -391,6 +394,90 @@ export default function Step8Page() {
     try {
       console.log("=".repeat(60));
       console.log("📊 STEP 8: Reimbursement with Adj. Gross & Payment Status");
+      // ========== LOAD DUE VOUCHER LIST ==========
+      const dueVoucherMap = new Map<
+        number,
+        { dueVC: number; alreadyPaid: number; name: string; dept: string }
+      >();
+
+      if (dueVoucherFile) {
+        console.log("\n📋 Loading Due Voucher List...");
+        const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
+        const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
+
+        const dueVoucherSheet =
+          dueVoucherWorkbook.Sheets[dueVoucherWorkbook.SheetNames[0]];
+        const dueVoucherData: any[][] = XLSX.utils.sheet_to_json(
+          dueVoucherSheet,
+          { header: 1 }
+        );
+
+        // Find header row
+        let headerIdx = -1;
+        for (let i = 0; i < dueVoucherData.length; i++) {
+          const row = dueVoucherData[i];
+          if (
+            row &&
+            row.some((cell: any) =>
+              /EMP.*CODE|EMPCODE/i.test(String(cell ?? ""))
+            )
+          ) {
+            headerIdx = i;
+            break;
+          }
+        }
+
+        if (headerIdx !== -1) {
+          const headers = dueVoucherData[headerIdx];
+          const empCodeIdx = headers.findIndex((h: any) =>
+            /EMP.*CODE|EMPCODE/i.test(String(h ?? ""))
+          );
+          const empNameIdx = headers.findIndex((h: any) =>
+            /EMP.*NAME/i.test(String(h ?? ""))
+          );
+          const deptIdx = headers.findIndex((h: any) =>
+            /DEPT/i.test(String(h ?? ""))
+          );
+          const dueVCIdx = headers.findIndex((h: any) =>
+            /DUE.*VC/i.test(String(h ?? ""))
+          );
+          const alreadyPaidIdx = headers.findIndex((h: any) =>
+            /ALREADY.*PAID/i.test(String(h ?? ""))
+          );
+
+          console.log(`\n✅ Processing Due Voucher List:`);
+          for (let i = headerIdx + 1; i < dueVoucherData.length; i++) {
+            const row = dueVoucherData[i];
+            if (!row || row.length === 0) continue;
+
+            const empCode = Number(row[empCodeIdx]);
+            if (!empCode || isNaN(empCode)) continue;
+
+            const empName = String(row[empNameIdx] || "").trim();
+            const dept = String(row[deptIdx] || "").trim();
+            const dueVC = Number(row[dueVCIdx]) || 0;
+            const alreadyPaid = Number(row[alreadyPaidIdx]) || 0;
+
+            // Only add employees with Due VC > 0 (these are unpaid)
+            if (dueVC > 0) {
+              dueVoucherMap.set(empCode, {
+                dueVC: dueVC,
+                alreadyPaid: alreadyPaid,
+                name: empName,
+                dept: dept,
+              });
+              console.log(`   Emp ${empCode}: Due VC = ₹${dueVC} → UNPAID`);
+            }
+          }
+        }
+
+        console.log(
+          `\n📊 Loaded ${dueVoucherMap.size} employees with Due VC (unpaid)`
+        );
+      } else {
+        console.log("\n⚠️ Due Voucher List file not found");
+      }
+
       console.log("=".repeat(60));
 
       // ========== LOAD ACTUAL PERCENTAGE FILE ==========
@@ -549,7 +636,9 @@ export default function Step8Page() {
               const unpaidHR =
                 unpaidIdx !== -1 ? Number(dataRow[unpaidIdx]) || 0 : 0;
               const alreadyPaidHR =
-                alreadyPaidIdx !== -1 ? Number(dataRow[alreadyPaidIdx]) || 0 : 0;
+                alreadyPaidIdx !== -1
+                  ? Number(dataRow[alreadyPaidIdx]) || 0
+                  : 0;
 
               if (!hrReimDataMap.has(empCode)) {
                 hrReimDataMap.set(empCode, {
@@ -748,8 +837,7 @@ export default function Step8Page() {
           // Employee in Per sheet: use 60% of gross for register
           adjustedGrossForRegister =
             softwareData.grossSal * SPECIAL_GROSS_MULTIPLIER;
-          registerCalculated =
-            (adjustedGrossForRegister * REGISTER_PERCENTAGE) / 100;
+          registerCalculated = adjustedGrossForRegister * percentageForActual / 100;
 
           console.log(
             `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | Gross=₹${softwareData.grossSal.toFixed(
@@ -761,7 +849,8 @@ export default function Step8Page() {
         } else {
           // Not in Per sheet: use full gross for register
           adjustedGrossForRegister = softwareData.grossSal;
-          registerCalculated = (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
+          registerCalculated =
+            (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
         }
 
         const gross2 = calculateGross2(
@@ -774,22 +863,28 @@ export default function Step8Page() {
           percentageForActual
         );
 
-        // Determine payment status
+        // Determine payment status from Due VC
         let paymentStatus = "None";
-        if (hrData) {
-          if (hrData.unpaidHR > 0) {
-            paymentStatus = "Unpaid";
-          } else if (hrData.alreadyPaidHR > 0) {
-            paymentStatus = "Already Paid";
-          }
+        const dueVCData = dueVoucherMap.get(empId);
+
+        if (dueVCData) {
+          // Employee has Due VC > 0, they are UNPAID
+          paymentStatus = "Unpaid";
+          console.log(`🔴 Emp ${empId}: UNPAID - Due VC = ₹${dueVCData.dueVC}`);
+        } else if (hrData && hrData.alreadyPaidHR > 0) {
+          // Check HR data for Already Paid
+          paymentStatus = "Already Paid";
         }
 
-        // NEW: Set Reim(Software) to 0 if Already Paid or Unpaid
+        // Set Reim(Software) to 0 if Unpaid or Already Paid
         let reimSoftware: number;
-        if (paymentStatus === "Already Paid" || paymentStatus === "Unpaid") {
+        if (paymentStatus === "Unpaid") {
+          reimSoftware = 0;
+          console.log(`🔒 Emp ${empId}: UNPAID - Reim(Software) set to 0`);
+        } else if (paymentStatus === "Already Paid") {
           reimSoftware = 0;
           console.log(
-            `🔒 Emp ${empId}: ${paymentStatus} - Reim(Software) set to 0`
+            `🔒 Emp ${empId}: Already Paid - Reim(Software) set to 0`
           );
         } else {
           reimSoftware = registerCalculated - actualCalculated;
@@ -817,6 +912,95 @@ export default function Step8Page() {
           paymentStatus: paymentStatus,
           difference: difference,
           status: status,
+          dueVC: dueVCData?.dueVC || 0,
+        });
+      }
+
+      // === Merge HR-only Unpaid employees not present in Staff sheets (softwareEmployeesData) ===
+      for (const [hrEmpId, hrRec] of hrReimDataMap) {
+        // Skip if already present from software side
+        const alreadyInComparison = comparison.some(
+          (r) => r.employeeId === hrEmpId
+        );
+        if (alreadyInComparison) continue;
+
+        // Only bring in when HR shows Unpaid or Already Paid info; prioritize showing Unpaid
+        const isUnpaid = (hrRec.unpaidHR || 0) > 0;
+        const isAlreadyPaid = (hrRec.alreadyPaidHR || 0) > 0;
+
+        if (!isUnpaid && !isAlreadyPaid) {
+          // No actionable payment status; skip
+          continue;
+        }
+
+        const paymentStatus = isUnpaid ? "Unpaid" : "Already Paid";
+
+        // When Staff sheets lack this employee, software side has no GROSS context.
+        // Populate minimal fields; set Reim(SW)=0 as per rule for Unpaid/Already Paid.
+        const registerPercentage = REGISTER_PERCENTAGE;
+        const actualPercentage = isUnpaid ? 0 : 0; // unknown, not used since Reim(SW)=0
+        const percentageSource = "HR-only";
+        const grossSal = 0;
+        const adjustedGross = 0;
+        const registerCalculated = 0;
+        const actualCalculated = 0;
+        const reimSoftware = 0; // CRITICAL: zero for Unpaid/Already Paid in software calculation
+        const reimHR = hrRec.reimHR || 0;
+
+        // For visibility: department/name from HR where available
+        const department = hrRec.dept || "Staff";
+        const employeeName = hrRec.name || "";
+
+        const difference = reimSoftware - reimHR;
+        const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+
+        // Add employees from Due VC list who aren't in software data
+        for (const [dueEmpId, dueRec] of dueVoucherMap) {
+          const alreadyInComparison = comparison.some(
+            (r) => r.employeeId === dueEmpId
+          );
+          if (alreadyInComparison) continue;
+
+          const hrData = hrReimDataMap.get(dueEmpId);
+
+          comparison.push({
+            employeeId: dueEmpId,
+            employeeName: dueRec.name,
+            department: dueRec.dept,
+            grossSal: 0,
+            adjustedGross: 0,
+            excludedOctober: false,
+            registerPercentage: 0,
+            actualPercentage: 0,
+            percentageSource: "Due VC Only",
+            registerCalculated: 0,
+            actualCalculated: 0,
+            reimSoftware: 0,
+            reimHR: hrData?.reimHR || 0,
+            dueVC: dueRec.dueVC,
+            paymentStatus: "Unpaid",
+            difference: 0 - (hrData?.reimHR || 0),
+            status: "Mismatch",
+          });
+        }
+
+        comparison.push({
+          employeeId: hrEmpId,
+          employeeName,
+          department,
+          grossSal,
+          adjustedGross,
+          excludedOctober: false,
+          registerPercentage,
+          actualPercentage,
+          percentageSource,
+          registerCalculated,
+          actualCalculated,
+          reimSoftware,
+          reimHR,
+          paymentStatus,
+          difference,
+          status,
         });
       }
 
@@ -950,23 +1134,29 @@ export default function Step8Page() {
   };
 
   // ========== Calculate Grand Totals ==========
-  const calculateGrandTotals = () => {
-    const totalReimSoftware = filteredData.reduce(
-      (sum, row) => sum + (Number(row.reimSoftware) || 0),
-      0
-    );
-    const totalReimHR = filteredData.reduce(
-      (sum, row) => sum + (Number(row.reimHR) || 0),
-      0
-    );
-    const totalDifference = totalReimSoftware - totalReimHR;
+const calculateGrandTotals = () => {
+  const totalReimSoftware = filteredData.reduce(
+    (sum, row) => sum + Number(row.reimSoftware || 0),
+    0
+  );
+  const totalReimHR = filteredData.reduce(
+    (sum, row) => sum + Number(row.reimHR || 0),
+    0
+  );
+  const totalDifference = totalReimSoftware - totalReimHR;
+  
+  // Grand Total Status: Mismatch if |difference| > number of employees
+  const employeeCount = filteredData.length;
+  const grandTotalStatus = Math.abs(totalDifference) > employeeCount ? "Mismatch" : "Match";
 
-    return {
-      totalReimSoftware,
-      totalReimHR,
-      totalDifference,
-    };
+  return {
+    totalReimSoftware,
+    totalReimHR,
+    totalDifference,
+    grandTotalStatus,
   };
+};
+
 
   const grandTotals = calculateGrandTotals();
 
@@ -1168,8 +1358,8 @@ export default function Step8Page() {
                       🎯 Adj. Gross Rule:
                     </p>
                     <p className="ml-4 text-purple-800">
-                      Employees in "Per" sheet use{" "}
-                      <strong>Gross × 60%</strong> for Register calculation
+                      Employees in "Per" sheet use <strong>Gross × 60%</strong>{" "}
+                      for Register calculation
                     </p>
                   </div>
 
@@ -1406,7 +1596,9 @@ export default function Step8Page() {
                         {filteredData.map((row, idx) => (
                           <tr
                             key={idx}
-                            className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                            className={
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            }
                           >
                             <td className="border border-gray-300 px-4 py-2">
                               {row.employeeId}
@@ -1509,10 +1701,17 @@ export default function Step8Page() {
                             {formatCurrency(grandTotals.totalDifference)}
                           </td>
                           <td className="border border-gray-300 px-4 py-3 text-center">
-                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
-                              Match
-                            </span>
-                          </td>
+  <span
+    className={`px-3 py-1 rounded-full text-sm font-medium ${
+      grandTotals.grandTotalStatus === "Match"
+        ? "bg-green-200 text-green-900"
+        : "bg-red-200 text-red-900"
+    }`}
+  >
+    {grandTotals.grandTotalStatus}
+  </span>
+</td>
+
                         </tr>
                       </tbody>
                     </table>

@@ -1,10 +1,9 @@
 "use client";
 
-import React, { useState, useEffect,useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useFileContext } from "@/contexts/FileContext";
 import * as XLSX from "xlsx";
-
 
 export default function Step5Page() {
   const router = useRouter();
@@ -15,210 +14,274 @@ export default function Step5Page() {
   const [error, setError] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const horizontalScrollRef = useRef<HTMLDivElement>(null);
-const proxyScrollRef = useRef<HTMLDivElement>(null);
+  const proxyScrollRef = useRef<HTMLDivElement>(null);
 
   // === Step 5 Audit Helpers ===
-const TOLERANCE_STEP5 = 12; // Step 5 uses ±12 to mark Match vs Mismatch
+  const TOLERANCE_STEP5 = 12; // Step 5 uses ±12 to mark Match vs Mismatch
 
-async function postAuditMessagesStep5(items: any[], batchId?: string) {
-  const bid =
-    batchId ||
-    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2));
-  await fetch('/api/audit/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchId: bid, step: 5, items }),
-  });
-  return bid;
-}
+  async function postAuditMessagesStep5(items: any[], batchId?: string) {
+    const bid =
+      batchId ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2));
+    await fetch("/api/audit/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: bid, step: 5, items }),
+    });
+    return bid;
+  }
 
-useEffect(() => {
-  const main = horizontalScrollRef.current;
-  const proxy = proxyScrollRef.current;
-  if (!main || !proxy) return;
-  const onProxyScroll = () => { main.scrollLeft = proxy.scrollLeft; };
-  const onMainScroll = () => { proxy.scrollLeft = main.scrollLeft; };
-  proxy.addEventListener("scroll", onProxyScroll);
-  main.addEventListener("scroll", onMainScroll);
-  return () => {
-    proxy.removeEventListener("scroll", onProxyScroll);
-    main.removeEventListener("scroll", onMainScroll);
+  useEffect(() => {
+    const main = horizontalScrollRef.current;
+    const proxy = proxyScrollRef.current;
+    if (!main || !proxy) return;
+    const onProxyScroll = () => {
+      main.scrollLeft = proxy.scrollLeft;
+    };
+    const onMainScroll = () => {
+      proxy.scrollLeft = main.scrollLeft;
+    };
+    proxy.addEventListener("scroll", onProxyScroll);
+    main.addEventListener("scroll", onMainScroll);
+    return () => {
+      proxy.removeEventListener("scroll", onProxyScroll);
+      main.removeEventListener("scroll", onMainScroll);
+    };
+  }, []);
+
+  function buildStep5MismatchMessages(rows: any[]) {
+    const items: any[] = [];
+    for (const r of rows) {
+      if (r?.status === "Mismatch") {
+        items.push({
+          level: "error",
+          tag: "mismatch",
+          text: `[step5] ${r.employeeId} ${r.employeeName} diff=${Number(
+            r.difference ?? 0
+          ).toFixed(2)}`,
+          scope:
+            r.department === "Staff"
+              ? "staff"
+              : r.department === "Worker"
+              ? "worker"
+              : "global",
+          source: "step5",
+          meta: {
+            employeeId: r.employeeId,
+            name: r.employeeName,
+            department: r.department,
+            dateOfJoining: r.dateOfJoining,
+            percentage: r.percentage,
+            grossSal: r.grossSal,
+            calculatedValue: r.calculatedValue,
+            gross2HR: r.gross2HR,
+            diff: r.difference,
+            tolerance: TOLERANCE_STEP5,
+          },
+        });
+      }
+    }
+    return items;
+  }
+
+  // Sorting state and helper, at the top of your Step5Page component:
+  const [sortConfig, setSortConfig] = useState<{
+    key: string;
+    direction: "asc" | "desc" | null;
+  }>({ key: "", direction: null });
+
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" | null = "asc";
+    if (sortConfig.key === key) {
+      direction =
+        sortConfig.direction === "asc"
+          ? "desc"
+          : sortConfig.direction === "desc"
+          ? null
+          : "asc";
+    }
+    setSortConfig({ key, direction });
   };
-}, []);
 
-function buildStep5MismatchMessages(rows: any[]) {
-  const items: any[] = [];
-  for (const r of rows) {
-    if (r?.status === 'Mismatch') {
-      items.push({
-        level: 'error',
-        tag: 'mismatch',
-        text: `[step5] ${r.employeeId} ${r.employeeName} diff=${Number(r.difference ?? 0).toFixed(2)}`,
-        scope: r.department === 'Staff' ? 'staff' : r.department === 'Worker' ? 'worker' : 'global',
-        source: 'step5',
-        meta: {
-          employeeId: r.employeeId,
-          name: r.employeeName,
-          department: r.department,
-          dateOfJoining: r.dateOfJoining,
-          percentage: r.percentage,
-          grossSal: r.grossSal,
-          calculatedValue: r.calculatedValue,
-          gross2HR: r.gross2HR,
-          diff: r.difference,
-          tolerance: TOLERANCE_STEP5,
-        },
+  useEffect(() => {
+    let dataToSort = departmentFilter === "All" ? comparisonData : filteredData;
+    if (sortConfig.key && sortConfig.direction) {
+      dataToSort = [...dataToSort].sort((a, b) => {
+        let aValue = a[sortConfig.key],
+          bValue = b[sortConfig.key];
+        // Numeric columns
+        if (
+          [
+            "employeeId",
+            "grossSalarySoftware",
+            "adjustedGross",
+            "percentage",
+            "registerSoftware",
+            "registerHR",
+            "hrOccurrences",
+            "difference",
+          ].includes(sortConfig.key)
+        ) {
+          aValue = Number(aValue) || 0;
+          bValue = Number(bValue) || 0;
+        } else {
+          aValue = String(aValue || "").toUpperCase();
+          bValue = String(bValue || "").toUpperCase();
+        }
+        if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
       });
     }
-  }
-  return items;
-}
+    setFilteredData(dataToSort);
+  }, [sortConfig, comparisonData, departmentFilter]);
 
-// Sorting state and helper, at the top of your Step5Page component:
-const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" | null }>({key: '', direction: null});
-
-const handleSort = (key: string) => {
-  let direction: "asc" | "desc" | null = "asc";
-  if (sortConfig.key === key) {
-    direction = sortConfig.direction === "asc" ? "desc" : sortConfig.direction === "desc" ? null : "asc";
-  }
-  setSortConfig({ key, direction });
-};
-
-useEffect(() => {
-  let dataToSort = departmentFilter === "All" ? comparisonData : filteredData;
-  if (sortConfig.key && sortConfig.direction) {
-    dataToSort = [...dataToSort].sort((a, b) => {
-      let aValue = a[sortConfig.key], bValue = b[sortConfig.key];
-      // Numeric columns
-      if (['employeeId', 'grossSalarySoftware', 'adjustedGross', 'percentage', 'registerSoftware', 'registerHR', 'hrOccurrences', 'difference'].includes(sortConfig.key)) {
-        aValue = Number(aValue) || 0; bValue = Number(bValue) || 0;
-      } else {
-        aValue = String(aValue || '').toUpperCase(); bValue = String(bValue || '').toUpperCase();
-      }
-      if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
-    });
-  }
-  setFilteredData(dataToSort);
-}, [sortConfig, comparisonData, departmentFilter]);
-
-const SortArrows = ({columnKey}: {columnKey: string}) => {
-  const isActive = sortConfig.key === columnKey;
-  return (
-    <div className="inline-flex flex-col ml-1">
-      <button
-        type="button"
-        className={`leading-none ${isActive && sortConfig.direction === 'asc' ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'}`}
-        onClick={() => handleSort(columnKey)}
-        tabIndex={-1}
-        title="Sort Ascending"
-      >
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5z" /></svg>
-      </button>
-      <button
-        type="button"
-        className={`leading-none -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'}`}
-        onClick={() => handleSort(columnKey)}
-        tabIndex={-1}
-        title="Sort Descending"
-      >
-        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z" /></svg>
-      </button>
-    </div>
-  );
-};
-
-function buildStep5SummaryMessage(rows: any[]) {
-  const total = rows.length || 0;
-  const mismatches = rows.filter((r) => r.status === 'Mismatch').length;
-  const matches = total - mismatches;
-
-  const staffRows = rows.filter((r) => r.department === 'Staff');
-  const workerRows = rows.filter((r) => r.department === 'Worker');
-
-  const staffMismatch = staffRows.filter((r) => r.status === 'Mismatch').length;
-  const workerMismatch = workerRows.filter((r) => r.status === 'Mismatch').length;
-
-  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
-  const staffCalcSum = sum(staffRows.map((r) => Number(r.calculatedValue || 0)));
-  const staffHRSum = sum(staffRows.map((r) => Number(r.gross2HR || 0)));
-
-  const workerGrossSalSum = sum(workerRows.map((r) => Number(r.grossSal || 0)));
-  const workerCalcSum = sum(workerRows.map((r) => Number(r.calculatedValue || 0)));
-  const workerHRSum = sum(workerRows.map((r) => Number(r.gross2HR || 0)));
-
-  return {
-    level: 'info',
-    tag: 'summary',
-    text: `Step5 run: total=${total} match=${matches} mismatch=${mismatches}`,
-    scope: 'global',
-    source: 'step5',
-    meta: {
-      totals: { total, matches, mismatches, tolerance: TOLERANCE_STEP5 },
-      staff: {
-        count: staffRows.length,
-        mismatches: staffMismatch,
-        grossSalSum: staffGrossSalSum,
-        calculatedSum: staffCalcSum,
-        hrGross2Sum: staffHRSum,
-      },
-      worker: {
-        count: workerRows.length,
-        mismatches: workerMismatch,
-        grossSalSum: workerGrossSalSum,
-        calculatedSum: workerCalcSum,
-        hrGross2Sum: workerHRSum,
-      },
-    },
+  const SortArrows = ({ columnKey }: { columnKey: string }) => {
+    const isActive = sortConfig.key === columnKey;
+    return (
+      <div className="inline-flex flex-col ml-1">
+        <button
+          type="button"
+          className={`leading-none ${
+            isActive && sortConfig.direction === "asc"
+              ? "text-purple-600"
+              : "text-gray-400 hover:text-gray-600"
+          }`}
+          onClick={() => handleSort(columnKey)}
+          tabIndex={-1}
+          title="Sort Ascending"
+        >
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M7 14l5-5 5 5z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={`leading-none -mt-1 ${
+            isActive && sortConfig.direction === "desc"
+              ? "text-purple-600"
+              : "text-gray-400 hover:text-gray-600"
+          }`}
+          onClick={() => handleSort(columnKey)}
+          tabIndex={-1}
+          title="Sort Descending"
+        >
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M7 10l5 5 5-5z" />
+          </svg>
+        </button>
+      </div>
+    );
   };
-}
 
-async function handleSaveAuditStep5(rows: any[]) {
-  if (!rows || rows.length === 0) return;
-  const items = [buildStep5SummaryMessage(rows), ...buildStep5MismatchMessages(rows)];
-  if (items.length === 0) return;
-  await postAuditMessagesStep5(items);
-}
-// Stable hash for run signature
-function djb2Hash(str: string) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
-  return (h >>> 0).toString(36);
-}
+  function buildStep5SummaryMessage(rows: any[]) {
+    const total = rows.length || 0;
+    const mismatches = rows.filter((r) => r.status === "Mismatch").length;
+    const matches = total - mismatches;
 
-function buildRunKeyStep5(rows: any[]) {
-  const sig = rows
-    .map(r =>
-      `${r.employeeId}|${r.department}|${Number(r.grossSal)||0}|${Number(r.calculatedValue)||0}|${Number(r.gross2HR)||0}|${Number(r.difference)||0}|${r.status}`
-    )
-    .join(';');
-  return djb2Hash(sig);
-}
+    const staffRows = rows.filter((r) => r.department === "Staff");
+    const workerRows = rows.filter((r) => r.department === "Worker");
 
-useEffect(() => {
-  if (typeof window === 'undefined') return; // SSR guard
-  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+    const staffMismatch = staffRows.filter(
+      (r) => r.status === "Mismatch"
+    ).length;
+    const workerMismatch = workerRows.filter(
+      (r) => r.status === "Mismatch"
+    ).length;
 
-  const runKey = buildRunKeyStep5(comparisonData);
-  const markerKey = `audit_step5_${runKey}`;
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const staffGrossSalSum = sum(staffRows.map((r) => Number(r.grossSal || 0)));
+    const staffCalcSum = sum(
+      staffRows.map((r) => Number(r.calculatedValue || 0))
+    );
+    const staffHRSum = sum(staffRows.map((r) => Number(r.gross2HR || 0)));
 
-  if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+    const workerGrossSalSum = sum(
+      workerRows.map((r) => Number(r.grossSal || 0))
+    );
+    const workerCalcSum = sum(
+      workerRows.map((r) => Number(r.calculatedValue || 0))
+    );
+    const workerHRSum = sum(workerRows.map((r) => Number(r.gross2HR || 0)));
 
-  sessionStorage.setItem(markerKey, '1');
-  const deterministicBatchId = `step5-${runKey}`;
+    return {
+      level: "info",
+      tag: "summary",
+      text: `Step5 run: total=${total} match=${matches} mismatch=${mismatches}`,
+      scope: "global",
+      source: "step5",
+      meta: {
+        totals: { total, matches, mismatches, tolerance: TOLERANCE_STEP5 },
+        staff: {
+          count: staffRows.length,
+          mismatches: staffMismatch,
+          grossSalSum: staffGrossSalSum,
+          calculatedSum: staffCalcSum,
+          hrGross2Sum: staffHRSum,
+        },
+        worker: {
+          count: workerRows.length,
+          mismatches: workerMismatch,
+          grossSalSum: workerGrossSalSum,
+          calculatedSum: workerCalcSum,
+          hrGross2Sum: workerHRSum,
+        },
+      },
+    };
+  }
 
-  const items = [buildStep5SummaryMessage(comparisonData), ...buildStep5MismatchMessages(comparisonData)];
+  async function handleSaveAuditStep5(rows: any[]) {
+    if (!rows || rows.length === 0) return;
+    const items = [
+      buildStep5SummaryMessage(rows),
+      ...buildStep5MismatchMessages(rows),
+    ];
+    if (items.length === 0) return;
+    await postAuditMessagesStep5(items);
+  }
+  // Stable hash for run signature
+  function djb2Hash(str: string) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  }
 
-  postAuditMessagesStep5(items, deterministicBatchId).catch(err => {
-    console.error('Auto-audit step5 failed', err);
-    sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
-  });
-}, [comparisonData]);
+  function buildRunKeyStep5(rows: any[]) {
+    const sig = rows
+      .map(
+        (r) =>
+          `${r.employeeId}|${r.department}|${Number(r.grossSal) || 0}|${
+            Number(r.calculatedValue) || 0
+          }|${Number(r.gross2HR) || 0}|${Number(r.difference) || 0}|${r.status}`
+      )
+      .join(";");
+    return djb2Hash(sig);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return; // SSR guard
+    if (!Array.isArray(comparisonData) || comparisonData.length === 0) return;
+
+    const runKey = buildRunKeyStep5(comparisonData);
+    const markerKey = `audit_step5_${runKey}`;
+
+    if (sessionStorage.getItem(markerKey)) return; // prevent duplicate on refresh/StrictMode
+
+    sessionStorage.setItem(markerKey, "1");
+    const deterministicBatchId = `step5-${runKey}`;
+
+    const items = [
+      buildStep5SummaryMessage(comparisonData),
+      ...buildStep5MismatchMessages(comparisonData),
+    ];
+
+    postAuditMessagesStep5(items, deterministicBatchId).catch((err) => {
+      console.error("Auto-audit step5 failed", err);
+      sessionStorage.removeItem(markerKey); // allow retry on next refresh if failed
+    });
+  }, [comparisonData]);
 
   type FileSlot = { type: string; file: File | null };
 
@@ -254,72 +317,89 @@ useEffect(() => {
       .toUpperCase();
 
   const MONTH_NAME_MAP: Record<string, number> = {
-    JAN: 1, JANUARY: 1,
-    FEB: 2, FEBRUARY: 2,
-    MAR: 3, MARCH: 3,
-    APR: 4, APRIL: 4,
+    JAN: 1,
+    JANUARY: 1,
+    FEB: 2,
+    FEBRUARY: 2,
+    MAR: 3,
+    MARCH: 3,
+    APR: 4,
+    APRIL: 4,
     MAY: 5,
-    JUN: 6, JUNE: 6,
-    JUL: 7, JULY: 7,
-    AUG: 8, AUGUST: 8,
-    SEP: 9, SEPT: 9, SEPTEMBER: 9,
-    OCT: 10, OCTOBER: 10,
-    NOV: 11, NOVEMBER: 11,
-    DEC: 12, DECEMBER: 12,
+    JUN: 6,
+    JUNE: 6,
+    JUL: 7,
+    JULY: 7,
+    AUG: 8,
+    AUGUST: 8,
+    SEP: 9,
+    SEPT: 9,
+    SEPTEMBER: 9,
+    OCT: 10,
+    OCTOBER: 10,
+    NOV: 11,
+    NOVEMBER: 11,
+    DEC: 12,
+    DECEMBER: 12,
   };
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
   const parseMonthFromSheetName = (sheetName: string): string | null => {
-    const s = String(sheetName || "").trim().toUpperCase();
-    
+    const s = String(sheetName || "")
+      .trim()
+      .toUpperCase();
+
     const yyyymm = s.match(/(20\d{2})\D{0,2}(\d{1,2})/);
     if (yyyymm) {
       const y = Number(yyyymm[1]);
       const m = Number(yyyymm[2]);
       if (y >= 2000 && m >= 1 && m <= 12) return `${y}-${pad2(m)}`;
     }
-    
-    const mon = s.match(/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/);
+
+    const mon = s.match(
+      /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b/
+    );
     const monthFull = s.match(
       /\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/
     );
     const y2or4 = s.match(/\b(20\d{2}|\d{2})\b/);
     const monthToken = (monthFull?.[1] || mon?.[1]) as string | undefined;
-    
+
     if (monthToken && y2or4) {
       let y = Number(y2or4[1]);
       if (y < 100) y += 2000;
       const m = MONTH_NAME_MAP[monthToken];
       if (m) return `${y}-${pad2(m)}`;
     }
-    
+
     return null;
   };
 
   const AVG_WINDOW: string[] = [
-    "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04",
-    "2025-05", "2025-06", "2025-07", "2025-08", "2025-09",
+    "2024-11",
+    "2024-12",
+    "2025-01",
+    "2025-02",
+    "2025-03",
+    "2025-04",
+    "2025-05",
+    "2025-06",
+    "2025-07",
+    "2025-08",
+    "2025-09",
   ];
 
   const EXCLUDED_MONTHS: string[] = ["2025-10", "2024-10"];
   const EXCLUDED_DEPARTMENTS = ["C", "CASH", "A"];
 
   const EXCLUDE_OCTOBER_EMPLOYEES = new Set<number>([
-    937, 1039, 1065, 1105, 59, 161
+    937, 1039, 1065, 1105, 59, 161,
   ]);
 
-  const INCLUDE_ZEROS_IN_AVG = new Set<number>([
-    20,
-    27,
-    882,
-    898,
-    999,
-  ]);
+  const INCLUDE_ZEROS_IN_AVG = new Set<number>([20, 27, 882, 898, 999]);
 
-  const EXCLUDE_ZEROS_IN_AVG = new Set<number>([
-    1054,
-  ]);
+  const EXCLUDE_ZEROS_IN_AVG = new Set<number>([1054]);
 
   const EMPLOYEE_START_MONTHS: Record<number, string> = {
     999: "2024-12",
@@ -341,70 +421,85 @@ useEffect(() => {
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 5: Register Calculation (Using Step-3 Gross Values)");
+      console.log(
+        "📊 STEP 5: Register Calculation (Using Step-3 Gross Values)"
+      );
       console.log("=".repeat(60));
-      console.log("⚡ NEW RULE: 12% employees = (Step3-Gross × 60%) × 12% = Gross × 7.2%");
+      console.log(
+        "⚡ NEW RULE: 12% employees = (Step3-Gross × 60%) × 12% = Gross × 7.2%"
+      );
       console.log("📌 DEFAULT RULE: 8.33% employees = Step3-Gross × 8.33%");
-      console.log("🚫 OCTOBER EXCLUDE LIST:", Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", "));
-      console.log("🚫 EXCLUDED DEPARTMENTS (Worker):", EXCLUDED_DEPARTMENTS.join(", "));
+      console.log(
+        "🚫 OCTOBER EXCLUDE LIST:",
+        Array.from(EXCLUDE_OCTOBER_EMPLOYEES).join(", ")
+      );
+      console.log(
+        "🚫 EXCLUDED DEPARTMENTS (Worker):",
+        EXCLUDED_DEPARTMENTS.join(", ")
+      );
       console.log("=".repeat(60));
 
       // ========== LOAD ACTUAL PERCENTAGE DATA ==========
-const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
-const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
-const actualPercentageSheet =
-  actualPercentageWorkbook.Sheets[actualPercentageWorkbook.SheetNames[0]];
-const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
-  actualPercentageSheet,
-  { header: 1 }
-);
+      const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
+      const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
+      const actualPercentageSheet =
+        actualPercentageWorkbook.Sheets[actualPercentageWorkbook.SheetNames[0]];
+      const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
+        actualPercentageSheet,
+        { header: 1 }
+      );
 
-const employeePercentageMap = new Map<number, number>();
-let headerRow = -1;
+      const employeePercentageMap = new Map<number, number>();
+      let headerRow = -1;
 
-for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
-  if (
-    actualPercentageData[i] &&
-    actualPercentageData[i].some((v: any) => {
-      const t = norm(v);
-      return t === "EMPCODE" || t === "EMPLOYEECODE";
-    })
-  ) {
-    headerRow = i;
-    break;
-  }
-}
-
-if (headerRow !== -1) {
-  const headers = actualPercentageData[headerRow];
-  const empCodeIdx = headers.findIndex((h: any) =>
-    ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
-  );
-  const percentageIdx = headers.findIndex((h: any) =>
-    /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
-  );
-
-  if (empCodeIdx !== -1 && percentageIdx !== -1) {
-    for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
-      const row = actualPercentageData[i];
-      if (!row || row.length === 0) continue;
-
-      const empCode = Number(row[empCodeIdx]);
-      const percentage = Number(row[percentageIdx]);
-
-      if (empCode && !isNaN(empCode) && percentage && !isNaN(percentage)) {
-        employeePercentageMap.set(empCode, percentage);
-        console.log(
-          `✅ Employee ${empCode}: Custom percentage ${percentage}%`
-        );
+      for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
+        if (
+          actualPercentageData[i] &&
+          actualPercentageData[i].some((v: any) => {
+            const t = norm(v);
+            return t === "EMPCODE" || t === "EMPLOYEECODE";
+          })
+        ) {
+          headerRow = i;
+          break;
+        }
       }
-    }
-  }
-}
 
-console.log(
-  `📋 Loaded custom percentages for ${employeePercentageMap.size} employees`
-);
+      if (headerRow !== -1) {
+        const headers = actualPercentageData[headerRow];
+        const empCodeIdx = headers.findIndex((h: any) =>
+          ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
+        );
+        const percentageIdx = headers.findIndex((h: any) =>
+          /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
+        );
+
+        if (empCodeIdx !== -1 && percentageIdx !== -1) {
+          for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
+            const row = actualPercentageData[i];
+            if (!row || row.length === 0) continue;
+
+            const empCode = Number(row[empCodeIdx]);
+            const percentage = Number(row[percentageIdx]);
+
+            if (
+              empCode &&
+              !isNaN(empCode) &&
+              percentage &&
+              !isNaN(percentage)
+            ) {
+              employeePercentageMap.set(empCode, percentage);
+              console.log(
+                `✅ Employee ${empCode}: Custom percentage ${percentage}%`
+              );
+            }
+          }
+        }
+      }
+
+      console.log(
+        `📋 Loaded custom percentages for ${employeePercentageMap.size} employees`
+      );
 
       // ========== LOAD BONUS FILE WITH ACCUMULATION FOR DUPLICATES ==========
       const bonusBuffer = await bonusFile.arrayBuffer();
@@ -458,7 +553,11 @@ console.log(
                 existing.registerHR += registerHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(2)}, Total now: ₹${existing.registerHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Worker Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(
+                    2
+                  )}, Total now: ₹${existing.registerHR.toFixed(2)} (${
+                    existing.occurrences
+                  } occurrences)`
                 );
               } else {
                 hrRegisterData.set(empCode, {
@@ -467,7 +566,9 @@ console.log(
                   occurrences: 1,
                 });
                 console.log(
-                  `✅ Worker Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}`
+                  `✅ Worker Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(
+                    2
+                  )}`
                 );
               }
             }
@@ -518,7 +619,11 @@ console.log(
                 existing.registerHR += registerHR;
                 existing.occurrences += 1;
                 console.log(
-                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(2)}, Total now: ₹${existing.registerHR.toFixed(2)} (${existing.occurrences} occurrences)`
+                  `🔄 Staff Emp ${empCode}: Duplicate found - Adding ₹${registerHR.toFixed(
+                    2
+                  )}, Total now: ₹${existing.registerHR.toFixed(2)} (${
+                    existing.occurrences
+                  } occurrences)`
                 );
               } else {
                 hrRegisterData.set(empCode, {
@@ -527,7 +632,9 @@ console.log(
                   occurrences: 1,
                 });
                 console.log(
-                  `✅ Staff Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(2)}`
+                  `✅ Staff Emp ${empCode}: First entry - Register: ₹${registerHR.toFixed(
+                    2
+                  )}`
                 );
               }
             }
@@ -535,26 +642,31 @@ console.log(
         }
       }
 
-      console.log(`✅ HR Register data loaded: ${hrRegisterData.size} employees`);
-      
-      const duplicateEmployees = Array.from(hrRegisterData.entries())
-        .filter(([_, data]) => data.occurrences > 1);
-      
+      console.log(
+        `✅ HR Register data loaded: ${hrRegisterData.size} employees`
+      );
+
+      const duplicateEmployees = Array.from(hrRegisterData.entries()).filter(
+        ([_, data]) => data.occurrences > 1
+      );
+
       if (duplicateEmployees.length > 0) {
         console.log("\n🔍 EMPLOYEES WITH MULTIPLE ENTRIES (SUMMED):");
         console.log("=".repeat(60));
         duplicateEmployees.forEach(([empId, data]) => {
           console.log(
-            `Emp ${empId}: ${data.occurrences} entries, Total Register (HR): ₹${data.registerHR.toFixed(2)}`
+            `Emp ${empId}: ${
+              data.occurrences
+            } entries, Total Register (HR): ₹${data.registerHR.toFixed(2)}`
           );
         });
       }
 
       // ========== COMPUTE GROSS SALARY (EXACT STEP-3 LOGIC) ==========
-      
+
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
-      
+
       const staffEmployees: Map<
         number,
         { name: string; dept: string; months: Map<string, number> }
@@ -562,19 +674,21 @@ console.log(
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Staff: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Staff: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -617,12 +731,15 @@ console.log(
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
           const salary1Raw = row[salary1Idx];
-          
-          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
-            ? 0 
-            : Number(salary1Raw) || 0;
+
+          const salary1 =
+            salary1Raw === null || salary1Raw === undefined || salary1Raw === ""
+              ? 0
+              : Number(salary1Raw) || 0;
 
           if (!empId || isNaN(empId) || !empName) continue;
 
@@ -635,13 +752,16 @@ console.log(
           }
 
           const emp = staffEmployees.get(empId)!;
-          
+
           const startMonth = EMPLOYEE_START_MONTHS[empId];
           if (startMonth && monthKey < startMonth) {
             continue;
           }
-          
-          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+
+          if (
+            INCLUDE_ZEROS_IN_AVG.has(empId) ||
+            EXCLUDE_ZEROS_IN_AVG.has(empId)
+          ) {
             emp.months.set(monthKey, salary1);
           } else {
             if (salary1 > 0) {
@@ -655,7 +775,7 @@ console.log(
 
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
-      
+
       const workerEmployees: Map<
         number,
         { name: string; dept: string; months: Map<string, number> }
@@ -663,19 +783,21 @@ console.log(
 
       for (let sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
-        
+
         if (EXCLUDED_MONTHS.includes(monthKey)) {
           console.log(`🚫 SKIP Worker: ${sheetName} (${monthKey}) - EXCLUDED`);
           continue;
         }
-        
+
         if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(`⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`);
+          console.log(
+            `⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+          );
           continue;
         }
 
         console.log(`✅ Processing Worker: ${sheetName} -> ${monthKey}`);
-        
+
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -699,12 +821,16 @@ console.log(
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-        
+
         const deptIdx = headers.findIndex((h: any) => {
           const normalized = norm(h);
-          return normalized === "DEPT" || normalized === "DEPARTMENT" || normalized === "DEPTT";
+          return (
+            normalized === "DEPT" ||
+            normalized === "DEPARTMENT" ||
+            normalized === "DEPTT"
+          );
         });
-        
+
         const salary1Idx = 8; // Column I
 
         if (empIdIdx === -1 || empNameIdx === -1) {
@@ -713,7 +839,9 @@ console.log(
         }
 
         if (deptIdx === -1) {
-          console.log(`⚠️ Warning: Department column not found in ${sheetName}`);
+          console.log(
+            `⚠️ Warning: Department column not found in ${sheetName}`
+          );
         }
 
         let excludedDeptCount = 0;
@@ -723,16 +851,21 @@ console.log(
           if (!row || row.length === 0) continue;
 
           const empId = Number(row[empIdIdx]);
-          const empName = String(row[empNameIdx] || "").trim().toUpperCase();
+          const empName = String(row[empNameIdx] || "")
+            .trim()
+            .toUpperCase();
           const salary1Raw = row[salary1Idx];
-          
-          const salary1 = (salary1Raw === null || salary1Raw === undefined || salary1Raw === "") 
-            ? 0 
-            : Number(salary1Raw) || 0;
+
+          const salary1 =
+            salary1Raw === null || salary1Raw === undefined || salary1Raw === ""
+              ? 0
+              : Number(salary1Raw) || 0;
 
           if (deptIdx !== -1) {
-            const dept = String(row[deptIdx] || "").trim().toUpperCase();
-            
+            const dept = String(row[deptIdx] || "")
+              .trim()
+              .toUpperCase();
+
             if (EXCLUDED_DEPARTMENTS.includes(dept)) {
               excludedDeptCount++;
               continue;
@@ -750,13 +883,16 @@ console.log(
           }
 
           const emp = workerEmployees.get(empId)!;
-          
+
           const startMonth = EMPLOYEE_START_MONTHS[empId];
           if (startMonth && monthKey < startMonth) {
             continue;
           }
-          
-          if (INCLUDE_ZEROS_IN_AVG.has(empId) || EXCLUDE_ZEROS_IN_AVG.has(empId)) {
+
+          if (
+            INCLUDE_ZEROS_IN_AVG.has(empId) ||
+            EXCLUDE_ZEROS_IN_AVG.has(empId)
+          ) {
             emp.months.set(monthKey, salary1);
           } else {
             if (salary1 > 0) {
@@ -766,7 +902,9 @@ console.log(
         }
 
         if (excludedDeptCount > 0) {
-          console.log(`💰 Filtered ${excludedDeptCount} workers from ${sheetName}`);
+          console.log(
+            `💰 Filtered ${excludedDeptCount} workers from ${sheetName}`
+          );
         }
       }
 
@@ -787,18 +925,18 @@ console.log(
         for (const [empId, rec] of src) {
           let baseSum = 0;
           const monthsIncluded: { month: string; value: number }[] = [];
-          
+
           const includeZeros = INCLUDE_ZEROS_IN_AVG.has(empId);
           const excludeZeros = EXCLUDE_ZEROS_IN_AVG.has(empId);
           const hasCustomStart = EMPLOYEE_START_MONTHS[empId] !== undefined;
-          
+
           const employeeWindow = hasCustomStart
-            ? AVG_WINDOW.filter(mk => mk >= EMPLOYEE_START_MONTHS[empId])
+            ? AVG_WINDOW.filter((mk) => mk >= EMPLOYEE_START_MONTHS[empId])
             : AVG_WINDOW;
-          
+
           for (const mk of employeeWindow) {
             const v = rec.months.get(mk);
-            
+
             if (includeZeros) {
               const val = v !== undefined ? Number(v) : 0;
               baseSum += val;
@@ -819,12 +957,15 @@ console.log(
 
           let estOct = 0;
           let total = baseSum;
-          const hasSep2025 = rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
+          const hasSep2025 =
+            rec.months.has("2025-09") && (rec.months.get("2025-09") || 0) > 0;
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
 
           if (isExcluded) {
             console.log(
-              `🚫 EMP ${empId} (${rec.name}): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
+              `🚫 EMP ${empId} (${
+                rec.name
+              }): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
             if (includeZeros) {
@@ -832,7 +973,7 @@ console.log(
               estOct = baseSum / divisor;
               total = baseSum + estOct;
             } else {
-              const values = monthsIncluded.map(m => m.value);
+              const values = monthsIncluded.map((m) => m.value);
               estOct = values.reduce((a, b) => a + b, 0) / values.length;
               total = baseSum + estOct;
             }
@@ -853,69 +994,83 @@ console.log(
       foldMonthly(staffEmployees);
       foldMonthly(workerEmployees);
 
-      console.log(`✅ Gross Salary computed (Step-3 logic): ${grossSalaryData.size} employees`);
+      console.log(
+        `✅ Gross Salary computed (Step-3 logic): ${grossSalaryData.size} employees`
+      );
 
       // ========== CALCULATE REGISTER WITH VARIABLE PERCENTAGES ==========
-const comparison: any[] = [];
+      const comparison: any[] = [];
 
-for (const [empId, empData] of grossSalaryData) {
-  const employeePercentage = employeePercentageMap.get(empId) || DEFAULT_PERCENTAGE;
-  
-  const shouldApplyGrossAdjustment = employeePercentage === SPECIAL_PERCENTAGE;
-  
-  let registerSoftware: number;
-  let adjustedGross: number;
-  
-  if (shouldApplyGrossAdjustment) {
-    adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
-    registerSoftware = (adjustedGross * employeePercentage) / 100;
-    
-    console.log(
-      `🎯 Emp ${empId}: ${employeePercentage}% with 60% adjustment | Gross=₹${empData.grossSalary.toFixed(2)} → 60%=₹${adjustedGross.toFixed(2)} → ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
-    );
-  } else {
-    adjustedGross = empData.grossSalary;
-    registerSoftware = (empData.grossSalary * employeePercentage) / 100;
-    
-    console.log(
-      `📊 Emp ${empId}: ${employeePercentage}% on full gross | Gross=₹${empData.grossSalary.toFixed(2)} × ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
-    );
-  }
+      for (const [empId, empData] of grossSalaryData) {
+        const employeePercentage =
+          employeePercentageMap.get(empId) || DEFAULT_PERCENTAGE;
 
-  const hrData = hrRegisterData.get(empId);
-  const registerHR = hrData?.registerHR || 0;
-  const occurrences = hrData?.occurrences || 0;
+        const shouldApplyGrossAdjustment =
+          employeePercentage === SPECIAL_PERCENTAGE;
 
-  const difference = registerSoftware - registerHR;
-  const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+        let registerSoftware: number;
+        let adjustedGross: number;
 
-  comparison.push({
-    employeeId: empId,
-    employeeName: empData.name,
-    department: empData.dept,
-    grossSalarySoftware: empData.grossSalary,
-    adjustedGross: adjustedGross,
-    percentage: employeePercentage,
-    appliedGrossAdjustment: shouldApplyGrossAdjustment,
-    registerSoftware: registerSoftware,
-    registerHR: registerHR,
-    hrOccurrences: occurrences,
-    difference: difference,
-    status: status,
-  });
+        if (shouldApplyGrossAdjustment) {
+          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
+          registerSoftware = (adjustedGross * employeePercentage) / 100;
 
-  if (occurrences > 1) {
-    console.log(
-      `🔄 Emp ${empId}: ${occurrences} HR entries summed to ₹${registerHR.toFixed(2)}`
-    );
-  }
-}
+          console.log(
+            `🎯 Emp ${empId}: ${employeePercentage}% with 60% adjustment | Gross=₹${empData.grossSalary.toFixed(
+              2
+            )} → 60%=₹${adjustedGross.toFixed(
+              2
+            )} → ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
+          );
+        } else {
+          adjustedGross = empData.grossSalary;
+          registerSoftware = (empData.grossSalary * employeePercentage) / 100;
+
+          console.log(
+            `📊 Emp ${empId}: ${employeePercentage}% on full gross | Gross=₹${empData.grossSalary.toFixed(
+              2
+            )} × ${employeePercentage}%=₹${registerSoftware.toFixed(2)}`
+          );
+        }
+
+        const hrData = hrRegisterData.get(empId);
+        const registerHR = hrData?.registerHR || 0;
+        const occurrences = hrData?.occurrences || 0;
+
+        const difference = registerSoftware - registerHR;
+        const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+
+        comparison.push({
+          employeeId: empId,
+          employeeName: empData.name,
+          department: empData.dept,
+          grossSalarySoftware: empData.grossSalary,
+          adjustedGross: adjustedGross,
+          percentage: employeePercentage,
+          appliedGrossAdjustment: shouldApplyGrossAdjustment,
+          registerSoftware: registerSoftware,
+          registerHR: registerHR,
+          hrOccurrences: occurrences,
+          difference: difference,
+          status: status,
+        });
+
+        if (occurrences > 1) {
+          console.log(
+            `🔄 Emp ${empId}: ${occurrences} HR entries summed to ₹${registerHR.toFixed(
+              2
+            )}`
+          );
+        }
+      }
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("✅ Register calculation completed using Step-3 gross values with 60% rule for 12% employees");
+      console.log(
+        "✅ Register calculation completed using Step-3 gross values with 60% rule for 12% employees"
+      );
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -1064,7 +1219,7 @@ for (const [empId, empData] of grossSalaryData) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 py-5 px-4">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -1072,7 +1227,8 @@ for (const [empId, empData] of grossSalaryData) {
                 Step 5 - Register Calculation (Using Step-3 Gross)
               </h1>
               <p className="text-gray-600 mt-2">
-                12% employees: (Step3-Gross × 60%) × 12% | 8.33% employees: Step3-Gross × 8.33%
+                12% employees: (Step3-Gross × 60%) × 12% | 8.33% employees:
+                Step3-Gross × 8.33%
               </p>
             </div>
             <div className="flex gap-3">
@@ -1089,7 +1245,7 @@ for (const [empId, empData] of grossSalaryData) {
                 Back to Step 1
               </button>
 
-               <button
+              <button
                 onClick={() => router.push("/step6")}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
               >
@@ -1160,7 +1316,8 @@ for (const [empId, empData] of grossSalaryData) {
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <p className="text-blue-800">
-                  Calculating with Step-3 gross and 60% rule for 12% employees...
+                  Calculating with Step-3 gross and 60% rule for 12%
+                  employees...
                 </p>
               </div>
             </div>
@@ -1226,95 +1383,173 @@ for (const [empId, empData] of grossSalaryData) {
               </div>
 
               <div className="border border-gray-300 rounded-lg overflow-hidden">
-  <div className="overflow-x-auto">
-    <div className="max-h-[600px] overflow-y-auto">
-      <table className="w-full border-collapse">
-        <thead className="bg-gray-100 sticky top-0 z-10">
-          <tr>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Employee ID<SortArrows columnKey="employeeId" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Employee Name<SortArrows columnKey="employeeName" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
-              <div className="flex items-center">Dept.<SortArrows columnKey="department" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Gross (Software)<SortArrows columnKey="grossSalarySoftware" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Adj. Gross<SortArrows columnKey="adjustedGross" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
-              <div className="flex items-center justify-center">%<SortArrows columnKey="percentage" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Register(Software)<SortArrows columnKey="registerSoftware" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Register(HR)<SortArrows columnKey="registerHR" /></div>
-            </th>
-           
-            <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
-              <div className="flex items-center justify-end">Difference<SortArrows columnKey="difference" /></div>
-            </th>
-            <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
-              <div className="flex items-center justify-center">Status<SortArrows columnKey="status" /></div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredData.map((row, idx) => (
-            <tr key={idx} className={`${idx % 2 === 0 ? "bg-white" : "bg-gray-50"} ${row.hrOccurrences > 1 ? "bg-yellow-50" : ""}`}>
-              <td className="border border-gray-300 px-4 py-2">{row.employeeId}</td>
-              <td className="border border-gray-300 px-4 py-2">{row.employeeName}</td>
-              <td className="border border-gray-300 px-4 py-2">
-                <span className={`px-2 py-1 rounded text-xs font-medium ${row.department === "Staff" ? "bg-blue-100 text-blue-800" : "bg-purple-100 text-purple-800"}`}>
-                  {row.department}
-                </span>
-              </td>
-              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.grossSalarySoftware)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.adjustedGross)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-center">
-                <span className={`px-2 py-1 rounded text-xs font-medium ${row.percentage === 12.0 ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-800"}`}>{row.percentage}%</span>
-              </td>
-              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.registerSoftware)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-right">{formatCurrency(row.registerHR)}</td>
-             
-              <td className={`border border-gray-300 px-4 py-2 text-right font-medium ${Math.abs(row.difference) <= 12 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(row.difference)}</td>
-              <td className="border border-gray-300 px-4 py-2 text-center">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${row.status === "Match" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>{row.status}</span>
-              </td>
-            </tr>
-          ))}
-          
-          {/* ========== GRAND TOTAL ROW ========== */}
-          <tr className="bg-purple-100 font-bold sticky bottom-0">
-            <td colSpan={6} className="border border-gray-300 px-4 py-3 text-right">
-              <span className="text-lg">GRAND TOTAL</span>
-            </td>
-            <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
-              {formatCurrency(grandTotals.totalRegisterSoftware)}
-            </td>
-            <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
-              {formatCurrency(grandTotals.totalRegisterHR)}
-            </td>
-            <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
-              {formatCurrency(grandTotals.totalDifference)}
-            </td>
-            <td className="border border-gray-300 px-4 py-3 text-center">
-              <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
-                Match
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
+                <div className="overflow-x-auto">
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <table className="w-full border-collapse">
+                      <thead className="bg-gray-100 sticky top-0 z-10">
+                        <tr>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Employee ID
+                              <SortArrows columnKey="employeeId" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Employee Name
+                              <SortArrows columnKey="employeeName" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-left bg-gray-100">
+                            <div className="flex items-center">
+                              Dept.
+                              <SortArrows columnKey="department" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Gross (Software)
+                              <SortArrows columnKey="grossSalarySoftware" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Adj. Gross
+                              <SortArrows columnKey="adjustedGross" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
+                            <div className="flex items-center justify-center">
+                              %<SortArrows columnKey="percentage" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Register(Software)
+                              <SortArrows columnKey="registerSoftware" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Register(HR)
+                              <SortArrows columnKey="registerHR" />
+                            </div>
+                          </th>
 
+                          <th className="border border-gray-300 px-4 py-3 text-right bg-gray-100">
+                            <div className="flex items-center justify-end">
+                              Difference
+                              <SortArrows columnKey="difference" />
+                            </div>
+                          </th>
+                          <th className="border border-gray-300 px-4 py-3 text-center bg-gray-100">
+                            <div className="flex items-center justify-center">
+                              Status
+                              <SortArrows columnKey="status" />
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            className={`${
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            } ${row.hrOccurrences > 1 ? "bg-yellow-50" : ""}`}
+                          >
+                            <td className="border border-gray-300 px-4 py-2">
+                              {row.employeeId}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              {row.employeeName}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.department === "Staff"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-purple-100 text-purple-800"
+                                }`}
+                              >
+                                {row.department}
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right">
+                              {formatCurrency(row.grossSalarySoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right">
+                              {formatCurrency(row.adjustedGross)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  row.percentage === 12.0
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-gray-100 text-gray-800"
+                                }`}
+                              >
+                                {row.percentage}%
+                              </span>
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right">
+                              {formatCurrency(row.registerSoftware)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-right">
+                              {formatCurrency(row.registerHR)}
+                            </td>
+
+                            <td
+                              className={`border border-gray-300 px-4 py-2 text-right font-medium ${
+                                Math.abs(row.difference) <= 12
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {formatCurrency(row.difference)}
+                            </td>
+                            <td className="border border-gray-300 px-4 py-2 text-center">
+                              <span
+                                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                  row.status === "Match"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+
+                        {/* ========== GRAND TOTAL ROW ========== */}
+                        <tr className="bg-purple-100 font-bold sticky bottom-0">
+                          <td
+                            colSpan={6}
+                            className="border border-gray-300 px-4 py-3 text-right"
+                          >
+                            <span className="text-lg">GRAND TOTAL</span>
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                            {formatCurrency(grandTotals.totalRegisterSoftware)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                            {formatCurrency(grandTotals.totalRegisterHR)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+                            {formatCurrency(grandTotals.totalDifference)}
+                          </td>
+                          <td className="border border-gray-300 px-4 py-3 text-center">
+                            <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                              Match
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
                 <div>
