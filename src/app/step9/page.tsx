@@ -628,7 +628,7 @@ export default function Step9Page() {
 
             const empCode = Number(row[empCodeIdx]);
             const percentage = Number(row[percentageIdx]);
-            
+
             if (!isNaN(empCode)) {
               actualPercentageEmployees.add(empCode);
             }
@@ -639,8 +639,12 @@ export default function Step9Page() {
         }
       }
 
-      console.log(`✅ Custom percentage data loaded: ${customPercentageMap.size} employees`);
-      console.log(`✅ Actual percentage employees identified: ${actualPercentageEmployees.size}`);
+      console.log(
+        `✅ Custom percentage data loaded: ${customPercentageMap.size} employees`
+      );
+      console.log(
+        `✅ Actual percentage employees identified: ${actualPercentageEmployees.size}`
+      );
 
       // ========== LOAD DUE VOUCHER DATA ==========
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
@@ -1331,11 +1335,13 @@ export default function Step9Page() {
 
         // 🔥 FIX: Calculate percentage properly (matching Step 8 logic)
         let percentage: number;
-        
+
         if (customPercentageMap.has(empId)) {
           // Use custom percentage from actualPercentageFile
           percentage = customPercentageMap.get(empId)!;
-          console.log(`✅ Emp ${empId}: Using custom percentage ${percentage}%`);
+          console.log(
+            `✅ Emp ${empId}: Using custom percentage ${percentage}%`
+          );
         } else {
           // Calculate based on months of service
           if (monthsOfService < 12) {
@@ -1345,36 +1351,37 @@ export default function Step9Page() {
           } else {
             percentage = 8.33;
           }
-          console.log(`✅ Emp ${empId}: Calculated percentage ${percentage}% (MOS: ${monthsOfService})`);
+          console.log(
+            `✅ Emp ${empId}: Calculated percentage ${percentage}% (MOS: ${monthsOfService})`
+          );
         }
 
-// Calculate register based on whether employee is in Per sheet
-let adjustedGross: number;
-let registerSoftware: number;
+        // Calculate register based on whether employee is in Per sheet
+        let adjustedGross: number;
+        let registerSoftware: number;
 
-if (customPercentageMap.has(empId)) {
-  // Employee in Per sheet: use 60% of gross for register, then apply their percentage
-  adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;  // 0.6
-  registerSoftware = (adjustedGross * percentage) / 100;
-  
-  console.log(
-    `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | ` +
-    `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
-    `60%=₹${adjustedGross.toFixed(2)} → ` +
-    `Register(${percentage}%)=₹${registerSoftware.toFixed(2)}`
-  );
-} else {
-  // Not in Per sheet: use full gross for register at 8.33%
-  adjustedGross = empData.grossSalary;
-  registerSoftware = (empData.grossSalary * 8.33) / 100;
-  
-  console.log(
-    `🎯 Emp ${empId}: Standard calc - ` +
-    `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
-    `Register(8.33%)=₹${registerSoftware.toFixed(2)}`
-  );
-}
+        if (customPercentageMap.has(empId)) {
+          // Employee in Per sheet: use 60% of gross for register, then apply their percentage
+          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER; // 0.6
+          registerSoftware = (adjustedGross * percentage) / 100;
 
+          console.log(
+            `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | ` +
+              `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
+              `60%=₹${adjustedGross.toFixed(2)} → ` +
+              `Register(${percentage}%)=₹${registerSoftware.toFixed(2)}`
+          );
+        } else {
+          // Not in Per sheet: use full gross for register at 8.33%
+          adjustedGross = empData.grossSalary;
+          registerSoftware = (empData.grossSalary * 8.33) / 100;
+
+          console.log(
+            `🎯 Emp ${empId}: Standard calc - ` +
+              `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
+              `Register(8.33%)=₹${registerSoftware.toFixed(2)}`
+          );
+        }
 
         let isEligible = true;
         if (empData.dept === "Worker") {
@@ -1390,35 +1397,34 @@ if (customPercentageMap.has(empId)) {
 
         const alreadyPaidData = alreadyPaidMap.get(empId);
         const alreadyPaid = alreadyPaidData?.paid || 0;
-
         const gross2 = calculateGross2(empData.grossSalary, percentage);
-        const actualCalculated = calculateActual(
-          empData.grossSalary,
-          gross2,
-          percentage
-        );
+
+        // Set actualCalculated to 0 for Worker department
+        const actualCalculated =
+          empData.dept === "Worker"
+            ? 0
+            : calculateActual(empData.grossSalary, gross2, percentage);
 
         // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
         // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
-let reimSoftware: number;
-let paymentStatus = "None";
+        let reimSoftware: number;
+        let paymentStatus = "None";
 
-if (empData.dept === "Worker") {
-  // Set Reim to 0 for all Worker employees
-  reimSoftware = 0;
-  console.log(`🔵 Emp ${empId} is WORKER - ReimSoftware set to 0`);
-} else if (alreadyPaidEmployees.has(empId)) {
-  reimSoftware = 0;
-  paymentStatus = "Already Paid";
-  console.log(`🔴 Emp ${empId} ALREADY PAID - ReimSoftware set to 0`);
-} else if (unpaidEmployees.has(empId)) {
-  reimSoftware = 0;
-  paymentStatus = "Unpaid";
-  console.log(`🔴 Emp ${empId} UNPAID - ReimSoftware set to 0`);
-} else {
-  reimSoftware = registerSoftware - actualCalculated;
-}
-
+        if (empData.dept === "Worker") {
+          // Set Reim to 0 for all Worker employees
+          reimSoftware = 0;
+          console.log(`🔵 Emp ${empId} is WORKER - ReimSoftware set to 0`);
+        } else if (alreadyPaidEmployees.has(empId)) {
+          reimSoftware = 0;
+          paymentStatus = "Already Paid";
+          console.log(`🔴 Emp ${empId} ALREADY PAID - ReimSoftware set to 0`);
+        } else if (unpaidEmployees.has(empId)) {
+          reimSoftware = 0;
+          paymentStatus = "Unpaid";
+          console.log(`🔴 Emp ${empId} UNPAID - ReimSoftware set to 0`);
+        } else {
+          reimSoftware = registerSoftware - actualCalculated;
+        }
 
         const finalRTGSSoftware =
           registerSoftware - unpaidSoftware - loanDeduction - alreadyPaid;
@@ -1985,6 +1991,14 @@ if (empData.dept === "Worker") {
                       .length
                   }
                 </div>
+                {grandTotals && (
+                  <p className="text-sm text-gray-700 font-semibold mt-2">
+                    Total Reim + Total Unpaid:{" "}
+                    {formatCurrency(
+                      grandTotals.reimSoftware + grandTotals.unpaidSoftware
+                    )}
+                  </p>
+                )}
               </div>
             </div>
           )}
