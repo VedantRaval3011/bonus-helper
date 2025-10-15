@@ -1055,7 +1055,7 @@ export default function Step4Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-5 px-4">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -1079,66 +1079,6 @@ export default function Step4Page() {
             </div>
           </div>
 
-          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Calculation Formula (Staff Only)
-            </h3>
-            <div className="text-sm text-blue-800 space-y-2">
-              <p>
-                <strong>Excel Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
-                Q*0.6, ""))
-              </p>
-              <p>
-                <strong>Where:</strong>
-              </p>
-              <ul className="list-disc ml-6 space-y-1">
-                <li>X = Percentage (calculated from Date of Joining)</li>
-                <li>
-                  Q = Gross(Software) (sum of monthly salaries + Oct 2025
-                  estimate)
-                </li>
-              </ul>
-              <p>
-                <strong>Logic:</strong>
-              </p>
-              <ul className="list-disc ml-6 space-y-1">
-                <li>
-                  If percentage = 8.33% → Gross2(Software) = Gross(Software)
-                </li>
-                <li>
-                  If percentage &gt; 8.33% (10% or 12%) → Gross2(Software) =
-                  Gross(Software) × 0.6
-                </li>
-              </ul>
-              <p>
-                <strong>October Filtering:</strong> If employee ID exists in the
-                "Average" sheet of Actual Percentage file, October estimate is
-                set to 0
-              </p>
-              <p>
-                <strong>Gross2(HR):</strong> SUM of all "GROSS 02" values from
-                bonus file (for duplicate employee IDs)
-              </p>
-              <p className="text-xs text-blue-600 mt-2">
-                Percentage is calculated based on service period as of Oct 12,
-                2025: &lt;12 months = 10% | 12-23 months = 12% | ≥24 months =
-                8.33%
-              </p>
-            </div>
-          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <FileCard

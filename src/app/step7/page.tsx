@@ -21,7 +21,7 @@ export default function Step7Page() {
   }>({ key: null, direction: null });
 
   // === Step 7 Audit Helpers ===
-  const TOLERANCE_STEP7 = 12; // Step 7 uses ±12 to mark Match vs Mismatch
+  const TOLERANCE_STEP7 = 12;
 
   async function postAuditMessagesStep7(items: any[], batchId?: string) {
     const bid =
@@ -909,6 +909,27 @@ export default function Step7Page() {
     }
   };
 
+  // 🎯 Calculate Grand Totals
+  const calculateGrandTotals = () => {
+    const totalActualCalculated = filteredData.reduce(
+      (sum, r) => sum + Number(r.actualCalculated || 0),
+      0
+    );
+    const totalActualHR = filteredData.reduce(
+      (sum, r) => sum + Number(r.actualHR || 0),
+      0
+    );
+    const totalDifference = totalActualCalculated - totalActualHR;
+
+    return {
+      totalActualCalculated,
+      totalActualHR,
+      totalDifference,
+    };
+  };
+
+  const grandTotals = calculateGrandTotals();
+
   const exportToExcel = () => {
     const ws = XLSX.utils.json_to_sheet(
       comparisonData.map((row) => ({
@@ -1260,7 +1281,7 @@ export default function Step7Page() {
                 <div className="max-h-[600px] overflow-y-auto">
                   <table className="w-full border-collapse">
                     <thead>
-                      <tr className="bg-gray-100">
+                      <tr className="bg-gray-100 sticky top-0 z-10">
                         <th
                           className="border border-gray-300 px-4 py-2 text-left cursor-pointer hover:bg-gray-200 select-none"
                           onClick={() => handleSort("employeeId")}
@@ -1440,6 +1461,30 @@ export default function Step7Page() {
                           </td>
                         </tr>
                       ))}
+
+                      {/* 🎯 GRAND TOTAL ROW */}
+                      <tr className="bg-purple-100 font-bold sticky bottom-0">
+                        <td
+                          colSpan={7}
+                          className="border border-gray-300 px-4 py-3 text-right"
+                        >
+                          <span className="text-lg">GRAND TOTAL</span>
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                          {formatCurrency(grandTotals.totalActualCalculated)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-right text-purple-900">
+                          {formatCurrency(grandTotals.totalActualHR)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-right text-green-700">
+                          {formatCurrency(grandTotals.totalDifference)}
+                        </td>
+                        <td className="border border-gray-300 px-4 py-3 text-center">
+                          <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-200 text-green-900">
+                            Match
+                          </span>
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>

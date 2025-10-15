@@ -189,7 +189,7 @@ export default function HomePage() {
             >
               View All Messages
             </button>
-            <button onClick={() => router.push('/others/step1')} className='px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition'>Move to Other Companies</button>
+            <button onClick={() => router.push('/')} className='px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition'>Move to Indiana</button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">

@@ -6,7 +6,7 @@ import { useFileContext } from "@/contexts/FileContext";
 import * as XLSX from "xlsx";
 
 type SortDirection = "asc" | "desc" | null;
-type SortableColumn = 
+type SortableColumn =
   | "employeeId"
   | "employeeName"
   | "department"
@@ -16,6 +16,8 @@ type SortableColumn =
   | "grossSalarySoftware"
   | "adjustedGross"
   | "registerSoftware"
+  | "actualCalculated"
+  | "reimSoftware"
   | "unpaidSoftware"
   | "alreadyPaid"
   | "loanDeduction"
@@ -82,6 +84,8 @@ export default function Step9Page() {
             grossSalarySoftware: r.grossSalarySoftware,
             adjustedGross: r.adjustedGross,
             registerSoftware: r.registerSoftware,
+            actualCalculated: r.actualCalculated,
+            reimSoftware: r.reimSoftware,
             unpaidSoftware: r.unpaidSoftware,
             alreadyPaid: r.alreadyPaid,
             loanDeduction: r.loanDeduction,
@@ -91,6 +95,7 @@ export default function Step9Page() {
             hrSheetCount: r.hrSheets?.length || 0,
             diff: r.difference,
             tolerance: TOLERANCE_STEP9,
+            paymentStatus: r.paymentStatus,
           },
         });
       }
@@ -120,6 +125,11 @@ export default function Step9Page() {
       (r) => r.percentage === 12.0
     ).length;
 
+    const alreadyPaidCount = rows.filter(
+      (r) => r.paymentStatus === "Already Paid"
+    ).length;
+    const unpaidCount = rows.filter((r) => r.paymentStatus === "Unpaid").length;
+
     const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
     const staffGrossSalSum = sum(
       staffRows.map((r) => Number(r.grossSalarySoftware || 0))
@@ -127,6 +137,10 @@ export default function Step9Page() {
     const staffRegisterSum = sum(
       staffRows.map((r) => Number(r.registerSoftware || 0))
     );
+    const staffActualSum = sum(
+      staffRows.map((r) => Number(r.actualCalculated || 0))
+    );
+    const staffReimSum = sum(staffRows.map((r) => Number(r.reimSoftware || 0)));
     const staffUnpaidSum = sum(
       staffRows.map((r) => Number(r.unpaidSoftware || 0))
     );
@@ -148,6 +162,12 @@ export default function Step9Page() {
     );
     const workerRegisterSum = sum(
       workerRows.map((r) => Number(r.registerSoftware || 0))
+    );
+    const workerActualSum = sum(
+      workerRows.map((r) => Number(r.actualCalculated || 0))
+    );
+    const workerReimSum = sum(
+      workerRows.map((r) => Number(r.reimSoftware || 0))
     );
     const workerUnpaidSum = sum(
       workerRows.map((r) => Number(r.unpaidSoftware || 0))
@@ -181,12 +201,16 @@ export default function Step9Page() {
           notEligible,
           multiSheetCount,
           specialPercentageCount,
+          alreadyPaidCount,
+          unpaidCount,
         },
         staff: {
           count: staffRows.length,
           mismatches: staffMismatch,
           grossSalSum: staffGrossSalSum,
           registerSum: staffRegisterSum,
+          actualSum: staffActualSum,
+          reimSum: staffReimSum,
           unpaidSum: staffUnpaidSum,
           alreadyPaidSum: staffAlreadyPaidSum,
           loanSum: staffLoanSum,
@@ -198,6 +222,8 @@ export default function Step9Page() {
           mismatches: workerMismatch,
           grossSalSum: workerGrossSalSum,
           registerSum: workerRegisterSum,
+          actualSum: workerActualSum,
+          reimSum: workerReimSum,
           unpaidSum: workerUnpaidSum,
           alreadyPaidSum: workerAlreadyPaidSum,
           loanSum: workerLoanSum,
@@ -232,7 +258,7 @@ export default function Step9Page() {
             Number(r.finalRTGSSoftware) || 0
           }|${Number(r.finalRTGSHR) || 0}|${Number(r.difference) || 0}|${
             r.status
-          }|${r.hrSheets?.length || 0}`
+          }|${r.hrSheets?.length || 0}|${r.paymentStatus || "None"}`
       )
       .join(";");
     return djb2Hash(sig);
@@ -409,7 +435,7 @@ export default function Step9Page() {
 
   const DEFAULT_PERCENTAGE = 8.33;
   const SPECIAL_PERCENTAGE = 12.0;
-  const SPECIAL_GROSS_MULTIPLIER = 0.6; // 60% of gross for 12% employees
+  const SPECIAL_GROSS_MULTIPLIER = 0.6;
   const TOLERANCE = 12;
 
   const referenceDate = new Date(Date.UTC(2025, 9, 30));
@@ -475,6 +501,32 @@ export default function Step9Page() {
     return monthsBetween(doj, referenceDate);
   };
 
+  const calculateGross2 = (grossSal: number, percentage: number): number => {
+    if (percentage === 8.33) {
+      return grossSal;
+    } else if (percentage > 8.33) {
+      return grossSal * 0.6;
+    } else {
+      return 0;
+    }
+  };
+
+  const calculateActual = (
+    grossSal: number,
+    gross2: number,
+    percentage: number
+  ): number => {
+    const pct = Number(percentage);
+
+    if (pct === 8.33) {
+      return (grossSal * pct) / 100;
+    } else if (pct > 8.33) {
+      return (gross2 * pct) / 100;
+    } else {
+      return 0;
+    }
+  };
+
   const processFiles = async () => {
     if (
       !staffFile ||
@@ -494,12 +546,16 @@ export default function Step9Page() {
     try {
       console.log("=".repeat(60));
       console.log(
-        "📊 STEP 9: Final RTGS Comparison (with adj.gross + already paid logic)"
+        "📊 STEP 9: Final RTGS Comparison (with Actual + Reim columns + GrandTotal)"
       );
       console.log("=".repeat(60));
-      console.log("⚡ NEW FORMULA: Register - Unpaid - Loan - Already Paid = Final RTGS");
+      console.log(
+        "⚡ FORMULA: Register - Unpaid - Loan - Already Paid = Final RTGS"
+      );
       console.log("⚡ 12% employees: (Step3-Gross × 60%) × 12% = Register");
       console.log("📌 8.33% employees: Step3-Gross × 8.33% = Register");
+      console.log("📌 Actual (Step 7) & Reim (Step 8) columns added");
+      console.log("🔴 Reim set to 0 for Already Paid or Unpaid employees");
 
       // ========== LOAD LOAN DEDUCTION DATA ==========
       const loanBuffer = await loanDeductionFile.arrayBuffer();
@@ -539,8 +595,9 @@ export default function Step9Page() {
         { header: 1 }
       );
 
-      const specialPercentageEmployees = new Set<number>();
+      const customPercentageMap = new Map<number, number>();
       let headerRow = -1;
+      const actualPercentageEmployees = new Set<number>();
 
       for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
         if (
@@ -571,21 +628,19 @@ export default function Step9Page() {
 
             const empCode = Number(row[empCodeIdx]);
             const percentage = Number(row[percentageIdx]);
-
-            if (
-              empCode &&
-              !isNaN(empCode) &&
-              percentage === SPECIAL_PERCENTAGE
-            ) {
-              specialPercentageEmployees.add(empCode);
+            
+            if (!isNaN(empCode)) {
+              actualPercentageEmployees.add(empCode);
+            }
+            if (!isNaN(empCode) && !isNaN(percentage) && percentage > 0) {
+              customPercentageMap.set(empCode, Number(percentage));
             }
           }
         }
       }
 
-      console.log(
-        `✅ Special percentage employees: ${specialPercentageEmployees.size}`
-      );
+      console.log(`✅ Custom percentage data loaded: ${customPercentageMap.size} employees`);
+      console.log(`✅ Actual percentage employees identified: ${actualPercentageEmployees.size}`);
 
       // ========== LOAD DUE VOUCHER DATA ==========
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
@@ -640,8 +695,8 @@ export default function Step9Page() {
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
 
       // ========== 🆕 LOAD "ALREADY PAID" (PAID) DATA FROM BONUS FILE ==========
-      const alreadyPaidMap: Map<number, { paid: number; sheets: string[] }> = new Map();
-
+      const alreadyPaidMap: Map<number, { paid: number; sheets: string[] }> =
+        new Map();
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
@@ -689,28 +744,19 @@ export default function Step9Page() {
           )
         );
 
-        // 🎯 Find "PAID" column (similar to how Step 6 does it)
-        const paidIdx = headers.findIndex((h: any) => {
-          const headerStr = String(h ?? "")
-            .trim()
-            .toUpperCase();
-          return (
-            headerStr === "PAID" ||
-            headerStr === "ALREADY PAID" ||
-            headerStr === "ALREADYPAID" ||
-            /^PAID$/i.test(headerStr)
-          );
-        });
+        const alreadyPaidIdx = headers.findIndex((h: any) =>
+          /^ALREADY\s*PAID$/i.test(String(h ?? "").trim())
+        );
 
-        if (empCodeIdx === -1 || paidIdx === -1) {
+        if (empCodeIdx === -1 || alreadyPaidIdx === -1) {
           console.log(
-            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, Paid: ${paidIdx})`
+            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, Paid: ${alreadyPaidIdx})`
           );
           continue;
         }
 
         console.log(
-          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Paid at ${paidIdx}`
+          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Paid at ${alreadyPaidIdx}`
         );
 
         let recordsInSheet = 0;
@@ -719,7 +765,7 @@ export default function Step9Page() {
           if (!row || row.length === 0) continue;
 
           const empCodeRaw = row[empCodeIdx];
-          const paidRaw = row[paidIdx];
+          const paidRaw = row[alreadyPaidIdx];
 
           if (
             empCodeRaw == null ||
@@ -736,30 +782,62 @@ export default function Step9Page() {
 
           recordsInSheet++;
 
+          const alreadyPaid =
+            alreadyPaidIdx !== -1 ? Number(row[alreadyPaidIdx]) || 0 : 0;
           if (!alreadyPaidMap.has(empCode)) {
             alreadyPaidMap.set(empCode, {
-              paid: paid,
+              paid: alreadyPaid,
               sheets: [sheetName],
             });
           } else {
-            const existing = alreadyPaidMap.get(empCode)!;
-            existing.paid += paid;
-            existing.sheets.push(sheetName);
-            console.log(
-              `  🔄 Emp ${empCode}: Adding Paid ₹${paid.toFixed(
-                2
-              )} from ${sheetName} (Total: ₹${existing.paid.toFixed(2)})`
-            );
+            const ex = alreadyPaidMap.get(empCode)!;
+            ex.paid += alreadyPaid;
+            ex.sheets.push(sheetName);
           }
+
+          console.log(
+            `     Emp ${empCode}: Adding Paid ${paid.toFixed(
+              2
+            )} from ${sheetName} (Total: ${alreadyPaidMap
+              .get(empCode)!
+              .paid.toFixed(2)})`
+          );
         }
 
         console.log(
-          `  ✅ Processed ${recordsInSheet} 'Paid' records from ${sheetName}`
+          `   Processed ${recordsInSheet} Paid records from ${sheetName}`
         );
       }
 
       console.log(
-        `✅ Already Paid data loaded: ${alreadyPaidMap.size} employees`
+        `\n✅ Already Paid data loaded: ${alreadyPaidMap.size} employees`
+      );
+
+      // 🆕 CREATE SETS FOR ALREADY PAID AND UNPAID EMPLOYEES
+      const alreadyPaidEmployees = new Set<number>();
+      const unpaidEmployees = new Set<number>();
+
+      // Populate alreadyPaidEmployees from alreadyPaidMap
+      for (const [empId, data] of alreadyPaidMap) {
+        if ((data.paid || 0) > 0) alreadyPaidEmployees.add(empId);
+      }
+
+      // 🆕 IDENTIFY UNPAID EMPLOYEES FROM DUE VOUCHER
+      console.log("\n💼 IDENTIFYING UNPAID EMPLOYEES FROM DUE VOUCHER");
+      console.log("=".repeat(60));
+
+      for (const [empId, dueVC] of dueVCMap) {
+        if (dueVC > 0) {
+          unpaidEmployees.add(empId);
+          console.log(
+            `🔴 Emp ${empId} marked as UNPAID - Due VC: ₹${dueVC.toFixed(2)}`
+          );
+        }
+      }
+
+      console.log(`✅ Unpaid employees identified: ${unpaidEmployees.size}`);
+      console.log(
+        `✅ Already Paid employees identified: ${alreadyPaidEmployees.size}`
       );
 
       // ========== LOAD BONUS FILE FOR FINAL RTGS (HR) ==========
@@ -768,7 +846,7 @@ export default function Step9Page() {
         { finalRTGS: number; sheets: string[] }
       > = new Map();
 
-      console.log("\n📊 LOADING 'FINAL RTGS' DATA FROM BONUS SHEETS");
+      console.log("\n💼 LOADING FINAL RTGS DATA FROM BONUS SHEETS");
       console.log("=".repeat(60));
 
       for (const sheetName of bonusWorkbook.SheetNames) {
@@ -867,35 +945,37 @@ export default function Step9Page() {
             const existing = hrFinalRTGSData.get(empCode)!;
             existing.finalRTGS += finalRTGS;
             existing.sheets.push(sheetName);
-            console.log(
-              `  🔄 Emp ${empCode}: Adding ₹${finalRTGS.toFixed(
-                2
-              )} from ${sheetName} (Total: ₹${existing.finalRTGS.toFixed(2)})`
-            );
           }
+
+          console.log(
+            `     Emp ${empCode}: Adding ${finalRTGS.toFixed(
+              2
+            )} from ${sheetName} (Total: ${hrFinalRTGSData
+              .get(empCode)!
+              .finalRTGS.toFixed(2)})`
+          );
         }
 
-        console.log(
-          `  ✅ Processed ${recordsInSheet} records from ${sheetName}`
-        );
+        console.log(`   Processed ${recordsInSheet} records from ${sheetName}`);
       }
 
       const multiSheetEmployees = Array.from(hrFinalRTGSData.entries()).filter(
         ([_, data]) => data.sheets.length > 1
       );
+
       console.log(
-        `\n📊 Employees appearing in multiple sheets: ${multiSheetEmployees.length}`
+        `\n⚠️ Employees appearing in multiple sheets: ${multiSheetEmployees.length}`
       );
       multiSheetEmployees.forEach(([empId, data]) => {
         console.log(
-          `  Emp ${empId}: ₹${data.finalRTGS.toFixed(
+          `   Emp ${empId}: ₹${data.finalRTGS.toFixed(
             2
-          )} across [${data.sheets.join(", ")}]`
+          )} across ${data.sheets.join(", ")}`
         );
       });
 
       console.log(
-        `✅ HR Final RTGS data loaded: ${hrFinalRTGSData.size} employees`
+        `\n✅ HR Final RTGS data loaded: ${hrFinalRTGSData.size} employees`
       );
 
       // ========== COMPUTE GROSS SALARY ==========
@@ -916,19 +996,18 @@ export default function Step9Page() {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
-          console.log(`🚫 SKIP Staff: ${sheetName} (${monthKey}) - EXCLUDED`);
+          console.log(`⏭️ SKIP Staff ${sheetName} (${monthKey} - EXCLUDED)`);
           continue;
         }
 
         if (!AVG_WINDOW.includes(monthKey)) {
           console.log(
-            `⏭️ SKIP Staff: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+            `⏭️ SKIP Staff ${sheetName} (${monthKey} - NOT IN WINDOW)`
           );
           continue;
         }
 
-        console.log(`✅ Processing Staff: ${sheetName} -> ${monthKey}`);
-
+        console.log(`📄 Processing Staff ${sheetName} - ${monthKey}`);
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -957,13 +1036,12 @@ export default function Step9Page() {
         );
         const salary1Idx = headers.findIndex(
           (h: any) =>
-            /^\s*SALARY\s*-?\s*1\s*$/i.test(String(h ?? "")) ||
-            norm(h) === "SALARY1"
+            /SALARY-?1/i.test(String(h ?? "")) || norm(h) === "SALARY1"
         );
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+          return /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE|DATE\s*JOINING|D\.O\.J/i.test(
             headerStr
           );
         });
@@ -988,11 +1066,13 @@ export default function Step9Page() {
           }
         }
 
-        if (dojIdx === -1 && headers.length > 15) {
+        if (dojIdx === -1 && headers.length >= 15) {
           dojIdx = headers.length - 1;
         }
 
-        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) continue;
+        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
+          continue;
+        }
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -1002,9 +1082,7 @@ export default function Step9Page() {
           const empName = String(row[empNameIdx] || "")
             .trim()
             .toUpperCase();
-
           const salary1Result = getCellValue(row[salary1Idx]);
-
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (!empId || isNaN(empId) || !empName) continue;
@@ -1019,8 +1097,8 @@ export default function Step9Page() {
           }
 
           const emp = staffEmployees.get(empId)!;
-
           const existing = emp.months.get(monthKey);
+
           if (existing) {
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
@@ -1034,7 +1112,7 @@ export default function Step9Page() {
         }
       }
 
-      console.log(`✅ Staff employees: ${staffEmployees.size}`);
+      console.log(`\n✅ Staff employees: ${staffEmployees.size}`);
 
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
@@ -1053,19 +1131,18 @@ export default function Step9Page() {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
-          console.log(`🚫 SKIP Worker: ${sheetName} (${monthKey}) - EXCLUDED`);
+          console.log(`⏭️ SKIP Worker ${sheetName} (${monthKey} - EXCLUDED)`);
           continue;
         }
 
         if (!AVG_WINDOW.includes(monthKey)) {
           console.log(
-            `⏭️ SKIP Worker: ${sheetName} (${monthKey}) - NOT IN WINDOW`
+            `⏭️ SKIP Worker ${sheetName} (${monthKey} - NOT IN WINDOW)`
           );
           continue;
         }
 
-        console.log(`✅ Processing Worker: ${sheetName} -> ${monthKey}`);
-
+        console.log(`📄 Processing Worker ${sheetName} - ${monthKey}`);
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -1086,7 +1163,6 @@ export default function Step9Page() {
         const empNameIdx = headers.findIndex((h: any) =>
           /EMPLOYEE\s*NAME/i.test(String(h ?? ""))
         );
-
         const deptIdx = headers.findIndex((h: any) => {
           const normalized = norm(h);
           return (
@@ -1095,21 +1171,22 @@ export default function Step9Page() {
             normalized === "DEPTT"
           );
         });
-
         const salary1Idx = 8;
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
-          return /DATE.*OF.*JOINING|DOJ|JOINING.*DATE|DATE.*JOINING|D\.O\.J/i.test(
+          return /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE|DATE\s*JOINING|D\.O\.J/i.test(
             headerStr
           );
         });
 
-        if (dojIdx === -1 && headers.length > 15) {
+        if (dojIdx === -1 && headers.length >= 15) {
           dojIdx = headers.length - 1;
         }
 
-        if (empIdIdx === -1 || empNameIdx === -1) continue;
+        if (empIdIdx === -1 || empNameIdx === -1) {
+          continue;
+        }
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -1119,9 +1196,7 @@ export default function Step9Page() {
           const empName = String(row[empNameIdx] || "")
             .trim()
             .toUpperCase();
-
           const salary1Result = getCellValue(row[salary1Idx]);
-
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
 
           if (deptIdx !== -1) {
@@ -1145,8 +1220,8 @@ export default function Step9Page() {
           }
 
           const emp = workerEmployees.get(empId)!;
-
           const existing = emp.months.get(monthKey);
+
           if (existing) {
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
@@ -1160,12 +1235,17 @@ export default function Step9Page() {
         }
       }
 
-      console.log(`✅ Worker employees: ${workerEmployees.size}`);
+      console.log(`\n✅ Worker employees: ${workerEmployees.size}`);
 
       // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION ==========
       const employeeData: Map<
         number,
-        { name: string; dept: string; grossSalary: number; dateOfJoining: any }
+        {
+          name: string;
+          dept: string;
+          grossSalary: number;
+          dateOfJoining: any;
+        }
       > = new Map();
 
       const foldMonthly = (
@@ -1200,21 +1280,20 @@ export default function Step9Page() {
 
           if (isExcluded) {
             console.log(
-              `🚫 EMP ${empId} (${
+              `🔴 EMP ${empId} ${
                 rec.name
-              }): IN EXCLUDE LIST - Base only = ₹${baseSum.toFixed(2)}`
+              } IN EXCLUDE LIST - Base only: ₹${baseSum.toFixed(2)}`
             );
           } else if (hasSep2025 && monthsIncluded.length > 0) {
             const values = monthsIncluded.map((m) => m.value);
             estOct = values.reduce((a, b) => a + b, 0) / values.length;
             total = baseSum + estOct;
-
             console.log(
-              `📊 EMP ${empId} (${rec.name}): Avg from ${
+              `📊 EMP ${empId} ${rec.name}: Avg from ${
                 monthsIncluded.length
-              } months with values = ₹${estOct.toFixed(
+              } months (with values) = ₹${estOct.toFixed(
                 2
-              )}, Total = ₹${total.toFixed(2)}`
+              )}, Total: ₹${total.toFixed(2)}`
             );
           }
 
@@ -1234,38 +1313,68 @@ export default function Step9Page() {
       foldMonthly(staffEmployees);
       foldMonthly(workerEmployees);
 
-      console.log(`✅ Employee data loaded: ${employeeData.size} employees`);
+      console.log(`\n✅ Employee data loaded: ${employeeData.size} employees`);
 
-      // ========== 🆕 CALCULATE FINAL RTGS WITH NEW FORMULA ==========
-      console.log("\n💰 CALCULATING FINAL RTGS WITH NEW FORMULA");
+      // ========== CALCULATE FINAL RTGS WITH NEW FORMULA ==========
+      console.log("\n🔢 CALCULATING FINAL RTGS WITH NEW FORMULA");
       console.log("=".repeat(60));
-      console.log("Formula: Register - Unpaid - Loan - Already Paid = Final RTGS");
+      console.log(
+        "Formula: Register - Unpaid - Loan - Already Paid = Final RTGS"
+      );
+      console.log("🔴 Reim = 0 for Already Paid or Unpaid employees");
       console.log("=".repeat(60));
 
       const comparison: any[] = [];
 
       for (const [empId, empData] of employeeData) {
-        const percentage = specialPercentageEmployees.has(empId)
-          ? SPECIAL_PERCENTAGE
-          : DEFAULT_PERCENTAGE;
+        const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
 
-        // Apply adj.gross logic just like Step-5
-        const shouldApplyGrossAdjustment = percentage === SPECIAL_PERCENTAGE;
+        // 🔥 FIX: Calculate percentage properly (matching Step 8 logic)
+        let percentage: number;
         
-        let adjustedGross: number;
-        let registerSoftware: number;
-        
-        if (shouldApplyGrossAdjustment) {
-          // For 12% employees: adj.gross = gross × 60%
-          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
-          registerSoftware = (adjustedGross * percentage) / 100;
+        if (customPercentageMap.has(empId)) {
+          // Use custom percentage from actualPercentageFile
+          percentage = customPercentageMap.get(empId)!;
+          console.log(`✅ Emp ${empId}: Using custom percentage ${percentage}%`);
         } else {
-          // For 8.33% employees: use full gross
-          adjustedGross = empData.grossSalary;
-          registerSoftware = (empData.grossSalary * percentage) / 100;
+          // Calculate based on months of service
+          if (monthsOfService < 12) {
+            percentage = 10.0;
+          } else if (monthsOfService >= 12 && monthsOfService < 24) {
+            percentage = 12.0;
+          } else {
+            percentage = 8.33;
+          }
+          console.log(`✅ Emp ${empId}: Calculated percentage ${percentage}% (MOS: ${monthsOfService})`);
         }
 
-        const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
+// Calculate register based on whether employee is in Per sheet
+let adjustedGross: number;
+let registerSoftware: number;
+
+if (customPercentageMap.has(empId)) {
+  // Employee in Per sheet: use 60% of gross for register, then apply their percentage
+  adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;  // 0.6
+  registerSoftware = (adjustedGross * percentage) / 100;
+  
+  console.log(
+    `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | ` +
+    `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
+    `60%=₹${adjustedGross.toFixed(2)} → ` +
+    `Register(${percentage}%)=₹${registerSoftware.toFixed(2)}`
+  );
+} else {
+  // Not in Per sheet: use full gross for register at 8.33%
+  adjustedGross = empData.grossSalary;
+  registerSoftware = (empData.grossSalary * 8.33) / 100;
+  
+  console.log(
+    `🎯 Emp ${empId}: Standard calc - ` +
+    `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
+    `Register(8.33%)=₹${registerSoftware.toFixed(2)}`
+  );
+}
+
 
         let isEligible = true;
         if (empData.dept === "Worker") {
@@ -1273,18 +1382,44 @@ export default function Step9Page() {
         }
 
         let unpaidSoftware = dueVCMap.get(empId) || 0;
-
         if (!isEligible) {
           unpaidSoftware = registerSoftware;
         }
 
         const loanDeduction = loanMap.get(empId) || 0;
-        
-        // 🆕 Get Already Paid amount
+
         const alreadyPaidData = alreadyPaidMap.get(empId);
         const alreadyPaid = alreadyPaidData?.paid || 0;
 
-        // 🆕 NEW FORMULA: Register - Unpaid - Loan - Already Paid
+        const gross2 = calculateGross2(empData.grossSalary, percentage);
+        const actualCalculated = calculateActual(
+          empData.grossSalary,
+          gross2,
+          percentage
+        );
+
+        // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
+        // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
+let reimSoftware: number;
+let paymentStatus = "None";
+
+if (empData.dept === "Worker") {
+  // Set Reim to 0 for all Worker employees
+  reimSoftware = 0;
+  console.log(`🔵 Emp ${empId} is WORKER - ReimSoftware set to 0`);
+} else if (alreadyPaidEmployees.has(empId)) {
+  reimSoftware = 0;
+  paymentStatus = "Already Paid";
+  console.log(`🔴 Emp ${empId} ALREADY PAID - ReimSoftware set to 0`);
+} else if (unpaidEmployees.has(empId)) {
+  reimSoftware = 0;
+  paymentStatus = "Unpaid";
+  console.log(`🔴 Emp ${empId} UNPAID - ReimSoftware set to 0`);
+} else {
+  reimSoftware = registerSoftware - actualCalculated;
+}
+
+
         const finalRTGSSoftware =
           registerSoftware - unpaidSoftware - loanDeduction - alreadyPaid;
 
@@ -1305,6 +1440,8 @@ export default function Step9Page() {
           grossSalarySoftware: empData.grossSalary,
           adjustedGross: adjustedGross,
           registerSoftware: registerSoftware,
+          actualCalculated: actualCalculated,
+          reimSoftware: reimSoftware,
           unpaidSoftware: unpaidSoftware,
           alreadyPaid: alreadyPaid,
           loanDeduction: loanDeduction,
@@ -1313,20 +1450,23 @@ export default function Step9Page() {
           hrSheets: hrSheets,
           difference: difference,
           status: status,
+          paymentStatus: paymentStatus,
         });
 
         console.log(
-          `Emp ${empId}: Register=₹${registerSoftware.toFixed(
+          `💰 Emp ${empId}: Register=${registerSoftware.toFixed(
             2
-          )} - Unpaid=₹${unpaidSoftware.toFixed(
+          )} - Unpaid=${unpaidSoftware.toFixed(
             2
-          )} - Loan=₹${loanDeduction.toFixed(
+          )} - Loan=${loanDeduction.toFixed(
             2
-          )} - AlreadyPaid=₹${alreadyPaid.toFixed(
+          )} - AlreadyPaid=${alreadyPaid.toFixed(
             2
-          )} = Final RTGS (SW)=₹${finalRTGSSoftware.toFixed(
+          )} = Final RTGS (SW)=${finalRTGSSoftware.toFixed(
             2
-          )}, Final RTGS (HR)=₹${finalRTGSHR.toFixed(2)}`
+          )}, Final RTGS (HR)=${finalRTGSHR.toFixed(
+            2
+          )}, Reim=${reimSoftware.toFixed(2)}, Status=${paymentStatus}`
         );
       }
 
@@ -1334,7 +1474,9 @@ export default function Step9Page() {
       setComparisonData(comparison);
       setFilteredData(comparison);
 
-      console.log("✅ Final RTGS comparison completed with new formula");
+      console.log(
+        "\n✅ Final RTGS comparison completed with new formula and Reim logic"
+      );
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -1364,9 +1506,8 @@ export default function Step9Page() {
     loanDeductionFile,
   ]);
 
-  // Apply filters and sorting
   useEffect(() => {
-    let filtered = comparisonData;
+    let filtered = [...comparisonData];
 
     if (departmentFilter !== "All") {
       filtered = filtered.filter((row) => row.department === departmentFilter);
@@ -1380,19 +1521,16 @@ export default function Step9Page() {
       }
     }
 
-    // Apply sorting
     if (sortColumn && sortDirection) {
       filtered = [...filtered].sort((a, b) => {
         let aVal = a[sortColumn];
         let bVal = b[sortColumn];
 
-        // Handle boolean values
         if (typeof aVal === "boolean") {
           aVal = aVal ? 1 : 0;
           bVal = bVal ? 1 : 0;
         }
 
-        // Handle string values
         if (typeof aVal === "string") {
           aVal = aVal.toLowerCase();
           bVal = bVal.toLowerCase();
@@ -1407,15 +1545,19 @@ export default function Step9Page() {
     }
 
     setFilteredData(filtered);
-  }, [departmentFilter, eligibilityFilter, comparisonData, sortColumn, sortDirection]);
+  }, [
+    departmentFilter,
+    eligibilityFilter,
+    comparisonData,
+    sortColumn,
+    sortDirection,
+  ]);
 
-  // Sort handler
   const handleSort = (column: SortableColumn, direction: "asc" | "desc") => {
     setSortColumn(column);
     setSortDirection(direction);
   };
 
-  // Sort button component
   const SortButtons = ({ column }: { column: SortableColumn }) => {
     return (
       <div className="inline-flex flex-col ml-1">
@@ -1474,6 +1616,8 @@ export default function Step9Page() {
         Gross: row.grossSalarySoftware,
         "Adj. Gross": row.adjustedGross,
         Register: row.registerSoftware,
+        Actual: row.actualCalculated,
+        Reim: row.reimSoftware,
         Unpaid: row.unpaidSoftware,
         "Already Paid": row.alreadyPaid,
         Loan: row.loanDeduction,
@@ -1482,6 +1626,7 @@ export default function Step9Page() {
         "HR Sheets": row.hrSheets.join(", "),
         Difference: row.difference,
         Status: row.status,
+        "Payment Status": row.paymentStatus,
       }))
     );
 
@@ -1493,9 +1638,39 @@ export default function Step9Page() {
     );
   };
 
+  const calculateGrandTotals = () => {
+    const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+
+    return {
+      grossSalarySoftware: sum(
+        filteredData.map((r) => Number(r.grossSalarySoftware || 0))
+      ),
+      adjustedGross: sum(filteredData.map((r) => Number(r.adjustedGross || 0))),
+      registerSoftware: sum(
+        filteredData.map((r) => Number(r.registerSoftware || 0))
+      ),
+      actualCalculated: sum(
+        filteredData.map((r) => Number(r.actualCalculated || 0))
+      ),
+      reimSoftware: sum(filteredData.map((r) => Number(r.reimSoftware || 0))),
+      unpaidSoftware: sum(
+        filteredData.map((r) => Number(r.unpaidSoftware || 0))
+      ),
+      alreadyPaid: sum(filteredData.map((r) => Number(r.alreadyPaid || 0))),
+      loanDeduction: sum(filteredData.map((r) => Number(r.loanDeduction || 0))),
+      finalRTGSSoftware: sum(
+        filteredData.map((r) => Number(r.finalRTGSSoftware || 0))
+      ),
+      finalRTGSHR: sum(filteredData.map((r) => Number(r.finalRTGSHR || 0))),
+      difference: sum(filteredData.map((r) => Number(r.difference || 0))),
+    };
+  };
+
+  const grandTotals = filteredData.length > 0 ? calculateGrandTotals() : null;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100">
-      <div className="container mx-auto px-4 py-8 max-w-[92rem]">
+      <div className="container mx-auto px-4 py-2 max-w-[92rem]">
         <div className="bg-white rounded-lg shadow-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -1535,7 +1710,7 @@ export default function Step9Page() {
           )}
 
           {comparisonData.length > 0 && (
-            <div className="mt-8">
+            <div className="mt-2">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-4">
                   <h2 className="text-xl font-bold text-gray-800">
@@ -1544,7 +1719,7 @@ export default function Step9Page() {
                   <select
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="px-4 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
                   >
                     <option value="All">All Departments</option>
                     <option value="Staff">Staff Only</option>
@@ -1581,120 +1756,209 @@ export default function Step9Page() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border border-gray-300">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="px-4 py-2 border">
-                        Emp ID <SortButtons column="employeeId" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Name <SortButtons column="employeeName" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Dept <SortButtons column="department" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        MOS <SortButtons column="monthsOfService" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Eligible <SortButtons column="isEligible" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        % <SortButtons column="percentage" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Gross <SortButtons column="grossSalarySoftware" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Adj. Gross <SortButtons column="adjustedGross" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Register <SortButtons column="registerSoftware" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Unpaid <SortButtons column="unpaidSoftware" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Already Paid <SortButtons column="alreadyPaid" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Loan <SortButtons column="loanDeduction" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Final RTGS (SW) <SortButtons column="finalRTGSSoftware" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Final RTGS (HR) <SortButtons column="finalRTGSHR" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Difference <SortButtons column="difference" />
-                      </th>
-                      <th className="px-4 py-2 border">
-                        Status <SortButtons column="status" />
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredData.map((row, idx) => (
-                      <tr
-                        key={idx}
-                        className={
-                          row.status === "Match"
-                            ? "bg-green-50"
-                            : "bg-red-50"
-                        }
-                      >
-                        <td className="px-4 py-2 border">{row.employeeId}</td>
-                        <td className="px-4 py-2 border">{row.employeeName}</td>
-                        <td className="px-4 py-2 border">{row.department}</td>
-                        <td className="px-4 py-2 border">{row.monthsOfService}</td>
-                        <td className="px-4 py-2 border">
-                          {row.isEligible ? "YES" : "NO"}
-                        </td>
-                        <td className="px-4 py-2 border">{row.percentage}%</td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.grossSalarySoftware)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.adjustedGross)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.registerSoftware)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.unpaidSoftware)}
-                        </td>
-                        <td className="px-4 py-2 border text-right bg-yellow-50">
-                          {formatCurrency(row.alreadyPaid)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.loanDeduction)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.finalRTGSSoftware)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.finalRTGSHR)}
-                        </td>
-                        <td className="px-4 py-2 border text-right">
-                          {formatCurrency(row.difference)}
-                        </td>
-                        <td className="px-4 py-2 border text-center">
-                          <span
-                            className={`px-2 py-1 rounded ${
-                              row.status === "Match"
-                                ? "bg-green-200 text-green-800"
-                                : "bg-red-200 text-red-800"
+              <div className="relative border-0 rounded-lg">
+                <div className="max-h-[600px] overflow-y-auto overflow-x-auto">
+                  <table className="min-w-full bg-white border border-gray-300">
+                    <thead className="bg-gray-100 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-4 py-2 border">
+                          Emp ID <SortButtons column="employeeId" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Name <SortButtons column="employeeName" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Dept <SortButtons column="department" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          MOS <SortButtons column="monthsOfService" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Eligible <SortButtons column="isEligible" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          % <SortButtons column="percentage" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Gross <SortButtons column="grossSalarySoftware" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Adj. Gross <SortButtons column="adjustedGross" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Register <SortButtons column="registerSoftware" />
+                        </th>
+                        <th className="px-4 py-2 border bg-blue-50">
+                          Actual <SortButtons column="actualCalculated" />
+                        </th>
+                        <th className="px-4 py-2 border bg-blue-50">
+                          Reim <SortButtons column="reimSoftware" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Unpaid <SortButtons column="unpaidSoftware" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Already Paid <SortButtons column="alreadyPaid" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Loan <SortButtons column="loanDeduction" />
+                        </th>
+                        <th className="px-4 py-2 border bg-green-50">
+                          Final RTGS (SW){" "}
+                          <SortButtons column="finalRTGSSoftware" />
+                        </th>
+                        <th className="px-4 py-2 border bg-green-50">
+                          Final RTGS (HR) <SortButtons column="finalRTGSHR" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Difference <SortButtons column="difference" />
+                        </th>
+                        <th className="px-4 py-2 border">
+                          Status <SortButtons column="status" />
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredData.map((row, idx) => (
+                        <tr
+                          key={idx}
+                          className={
+                            row.status === "Match" ? "bg-green-50" : "bg-red-50"
+                          }
+                        >
+                          <td className="px-4 py-2 border">{row.employeeId}</td>
+                          <td className="px-4 py-2 border">
+                            <div className="flex items-center gap-2">
+                              <span>{row.employeeName}</span>
+                              {row.paymentStatus === "Already Paid" && (
+                                <span className="text-xs bg-teal-100 text-teal-700 px-2 py-0.5 rounded font-medium">
+                                  Already Paid
+                                </span>
+                              )}
+                              {row.paymentStatus === "Unpaid" && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">
+                                  Unpaid
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 border">{row.department}</td>
+                          <td className="px-4 py-2 border">
+                            {row.monthsOfService}
+                          </td>
+                          <td className="px-4 py-2 border">
+                            {row.isEligible ? "YES" : "NO"}
+                          </td>
+                          <td className="px-4 py-2 border">
+                            {row.percentage}%
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.grossSalarySoftware)}
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.adjustedGross)}
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.registerSoftware)}
+                          </td>
+                          <td className="px-4 py-2 border text-right bg-blue-50">
+                            {formatCurrency(row.actualCalculated)}
+                          </td>
+                          <td
+                            className={`px-4 py-2 border text-right ${
+                              row.reimSoftware === 0 &&
+                              (row.paymentStatus === "Already Paid" ||
+                                row.paymentStatus === "Unpaid")
+                                ? "bg-red-100 font-semibold"
+                                : "bg-blue-50"
                             }`}
                           >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {formatCurrency(row.reimSoftware)}
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.unpaidSoftware)}
+                          </td>
+                          <td className="px-4 py-2 border text-right bg-yellow-50">
+                            {formatCurrency(row.alreadyPaid)}
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.loanDeduction)}
+                          </td>
+                          <td className="px-4 py-2 border text-right bg-green-50 font-semibold">
+                            {formatCurrency(row.finalRTGSSoftware)}
+                          </td>
+                          <td className="px-4 py-2 border text-right bg-green-50 font-semibold">
+                            {formatCurrency(row.finalRTGSHR)}
+                          </td>
+                          <td className="px-4 py-2 border text-right">
+                            {formatCurrency(row.difference)}
+                          </td>
+                          <td className="px-4 py-2 border text-center">
+                            <span
+                              className={`px-2 py-1 rounded ${
+                                row.status === "Match"
+                                  ? "bg-green-200 text-green-800"
+                                  : "bg-red-200 text-red-800"
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+
+                    {/* Grand Total Row - Sticky at bottom inside table */}
+                    {grandTotals && (
+                      <tfoot className="sticky bottom-0 z-10">
+                        <tr className="bg-gradient-to-r from-indigo-50 to-purple-50 font-bold text-gray-900">
+                          <td
+                            className="px-4 py-4 border text-center"
+                            colSpan={6}
+                          >
+                            <span className="text-indigo-800 text-base">
+                              TOTALS →
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-blue-50">
+                            {formatCurrency(grandTotals.grossSalarySoftware)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-blue-50">
+                            {formatCurrency(grandTotals.adjustedGross)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-purple-50">
+                            {formatCurrency(grandTotals.registerSoftware)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-indigo-100">
+                            {formatCurrency(grandTotals.actualCalculated)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-indigo-100">
+                            {formatCurrency(grandTotals.reimSoftware)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-orange-50">
+                            {formatCurrency(grandTotals.unpaidSoftware)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-yellow-100">
+                            {formatCurrency(grandTotals.alreadyPaid)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-pink-50">
+                            {formatCurrency(grandTotals.loanDeduction)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-green-200 text-lg font-black">
+                            {formatCurrency(grandTotals.finalRTGSSoftware)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-green-200 text-lg font-black">
+                            {formatCurrency(grandTotals.finalRTGSHR)}
+                          </td>
+                          <td className="px-4 py-4 border text-right bg-red-100">
+                            {formatCurrency(grandTotals.difference)}
+                          </td>
+                          <td className="px-4 py-4 border"></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
               </div>
 
               <div className="mt-4 flex justify-between items-center text-sm text-gray-600">
@@ -1708,7 +1972,18 @@ export default function Step9Page() {
                   Matches:{" "}
                   {filteredData.filter((r) => r.status === "Match").length} |
                   Mismatches:{" "}
-                  {filteredData.filter((r) => r.status === "Mismatch").length}
+                  {filteredData.filter((r) => r.status === "Mismatch").length} |
+                  Already Paid:{" "}
+                  {
+                    filteredData.filter(
+                      (r) => r.paymentStatus === "Already Paid"
+                    ).length
+                  }{" "}
+                  | Unpaid:{" "}
+                  {
+                    filteredData.filter((r) => r.paymentStatus === "Unpaid")
+                      .length
+                  }
                 </div>
               </div>
             </div>
