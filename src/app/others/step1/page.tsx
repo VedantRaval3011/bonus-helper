@@ -149,7 +149,7 @@ export default function HomePage() {
 
   const handleNext = () => {
     if (!hasHighOrCriticalErrors()) {
-      router.push('/step2');
+      router.push('step2');
     } else {
       setShowPasswordModal(true);
     }
