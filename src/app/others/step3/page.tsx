@@ -39,15 +39,16 @@ export default function Step3Page() {
     pickFile((s) => s.type === "Indiana-Worker") ??
     pickFile((s) => !!s.file && /worker/i.test(s.file.name));
 
-  const bonusFile =
-    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-    pickFile(
-      (s) =>
-        !!s.file &&
-        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet/i.test(
-          s.file.name
-        )
-    );
+const bonusFile =
+  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+  pickFile(
+    (s) =>
+      !!s.file &&
+      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+        s.file.name
+      )
+  );
+
 
   const norm = (x: any) =>
     String(x ?? "")
