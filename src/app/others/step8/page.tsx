@@ -31,13 +31,16 @@ export default function Step8Page() {
     pickFile((s) => s.type === "Indiana-Staff") ??
     pickFile((s) => !!s.file && /staff/i.test(s.file.name));
 
-  const bonusFile =
-    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-    pickFile(
-      (s) =>
-        !!s.file &&
-        /bonus.*final.*calculation|bonus.*2024-25/i.test(s.file.name)
-    );
+const bonusFile =
+  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+  pickFile(
+    (s) =>
+      !!s.file &&
+      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+        s.file.name
+      )
+  );
+
   const dueVoucherFile =
     pickFile((s) => s.type === "Due-Voucher-List") ??
     pickFile((s) => !!s.file && /due.*voucher/i.test(s.file.name));

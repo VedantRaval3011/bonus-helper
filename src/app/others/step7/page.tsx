@@ -487,7 +487,12 @@ export default function Step7Page() {
       };
 
       const headerText = (v: any) =>
-        String(v ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+        String(v ?? "")
+          .replace(/[,₹()/.]/g, " ") // drop common punctuation
+          .replace(/[_\-]+/g, " ") // unify underscores/dashes
+          .replace(/\s+/g, " ") // collapse spaces
+          .trim()
+          .toUpperCase();
 
       const possibleStaffSheetNames = bonusWorkbook.SheetNames.filter((sn) => {
         const s = headerText(sn);
@@ -540,7 +545,9 @@ export default function Step7Page() {
         const sheet = bonusWorkbook.Sheets[sheetName];
         if (!sheet) continue;
 
-        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+        });
         if (!Array.isArray(sheetData) || sheetData.length === 0) continue;
 
         // locate header row
@@ -612,10 +619,14 @@ export default function Step7Page() {
             String(row.find((c) => typeof c === "string") ?? "").trim();
 
           const dept =
-            idxs.deptIdx !== -1 ? String(row[idxs.deptIdx] ?? "").trim() : "Staff";
+            idxs.deptIdx !== -1
+              ? String(row[idxs.deptIdx] ?? "").trim()
+              : "Staff";
 
           const actualCell =
-            idxs.actualIdx >= 0 && idxs.actualIdx < row.length ? row[idxs.actualIdx] : 0;
+            idxs.actualIdx >= 0 && idxs.actualIdx < row.length
+              ? row[idxs.actualIdx]
+              : 0;
 
           const actualHR = Number(actualCell) || 0;
 
@@ -630,7 +641,9 @@ export default function Step7Page() {
         }
       }
 
-      console.log(`\n✅ HR Data loaded (robust): ${hrActualDataMap.size} employees`);
+      console.log(
+        `\n✅ HR Data loaded (robust): ${hrActualDataMap.size} employees`
+      );
 
       // ========== STEP 2: PROCESS STAFF FILE TO CALCULATE GROSS SAL ==========
       const staffBuffer = await staffFile.arrayBuffer();
@@ -781,54 +794,18 @@ export default function Step7Page() {
       const comparison: any[] = [];
 
       for (const [empId, softwareData] of softwareEmployeesData) {
-        const hrData = softwareData ? null : null; // placeholder to keep lints calm
-        const realHr = hrData; // not used
-        const fetchedHR = ((): {
-          actualHRValues: number[];
-          name: string;
-          dept: string;
-        } | null => {
-          // merge with HR map after we calculated software data
-          return null;
-        })();
+        // ✅ CORRECT: Fetch HR data directly from the map
+        const hrEntry = hrActualDataMap.get(empId);
 
-        // Actually read from the HR map built above
-        const hrMapEntry = ((): {
-          actualHRValues: number[];
-          name: string;
-          dept: string;
-        } | undefined => {
-          return undefined;
-        })();
-
-        const realHrData = hrMapEntry; // dead code retained for clarity
-
-        // Correct usage:
-        const hrDataResolved = ((): {
-          actualHRValues: number[];
-          name: string;
-          dept: string;
-        } | undefined => {
-          return undefined;
-        })();
-
-        // Use the real map directly:
-        const mapEntry = ((): {
-          actualHRValues: number[];
-          name: string;
-          dept: string;
-        } | undefined => {
-          // will be patched below once map is in closure
-          return undefined;
-        })();
-
-        // Re-compute months to decide percentage
-        const monthsFromDOJ = calculateMonthsFromDOJ(softwareData.dateOfJoining);
+        // Calculate months from DOJ to determine percentage
+        const monthsFromDOJ = calculateMonthsFromDOJ(
+          softwareData.dateOfJoining
+        );
 
         let percentageCalculated: number;
         let percentageSource: string;
 
-        // customPercentageMap is in scope here
+        // Check if custom percentage exists
         if (customPercentageMap.has(empId)) {
           percentageCalculated = customPercentageMap.get(empId)!;
           percentageSource = "Custom";
@@ -840,25 +817,25 @@ export default function Step7Page() {
           percentageSource = "Calculated";
         }
 
+        // Calculate GROSS 2
         const gross2 = calculateGross2(
           softwareData.grossSal,
           percentageCalculated
         );
+
+        // Calculate Actual (Software)
         const actualCalculated = calculateActual(
           softwareData.grossSal,
           gross2,
           percentageCalculated
         );
 
-        // NOTE: hrActualDataMap is defined above. Access directly here.
-        // TypeScript scopes allow this usage.
-        // Sum HR values when present
-        // @ts-ignore - defined above
-        const hrEntry = hrActualDataMap.get(empId);
+        // ✅ Sum all HR actual values (handles multiple entries)
         const actualHR = hrEntry
           ? hrEntry.actualHRValues.reduce((sum, val) => sum + val, 0)
           : 0;
 
+        // Calculate difference and status
         const difference = actualCalculated - actualHR;
         const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
 
@@ -883,6 +860,8 @@ export default function Step7Page() {
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
+
+      console.log("\n✅ Calculation completed with custom percentages");
 
       console.log("\n✅ Calculation completed with custom percentages");
     } catch (err: any) {
