@@ -460,8 +460,8 @@ export default function Step9Page() {
       // Handle DD.MM.YYYY or DD.MM.YY format (with dots - common in Excel)
       const ddmmyyyyDots = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/.exec(s);
       if (ddmmyyyyDots) {
-        let day = parseInt(ddmmyyyyDots[1], 10);
-        let month = parseInt(ddmmyyyyDots[2], 10);
+        const day = parseInt(ddmmyyyyDots[1], 10);
+        const month = parseInt(ddmmyyyyDots[2], 10);
         let year = parseInt(ddmmyyyyDots[3], 10);
 
         // Handle 2-digit years
@@ -478,8 +478,8 @@ export default function Step9Page() {
       // Match DD-MM-YYYY or DD-MM-YY format
       const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
       if (ddmmyyyy) {
-        let day = parseInt(ddmmyyyy[1], 10);
-        let month = parseInt(ddmmyyyy[2], 10);
+        const day = parseInt(ddmmyyyy[1], 10);
+        const month = parseInt(ddmmyyyy[2], 10);
         let year = parseInt(ddmmyyyy[3], 10);
 
         // Handle 2-digit years
@@ -729,7 +729,7 @@ export default function Step9Page() {
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
         if (EXCLUDED_MONTHS.includes(monthKey)) continue;
         if (!AVG_WINDOW.includes(monthKey)) continue;
@@ -853,7 +853,7 @@ export default function Step9Page() {
         }
       > = new Map();
 
-      for (let sheetName of workerWorkbook.SheetNames) {
+      for (const sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
         if (EXCLUDED_MONTHS.includes(monthKey)) continue;
         if (!AVG_WINDOW.includes(monthKey)) continue;
@@ -886,7 +886,7 @@ export default function Step9Page() {
           );
         });
         const salary1Idx = 8;
-        let dojIdx = headers.findIndex((h: any) => {
+        const dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
           return /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE|DATE\s*JOINING|D\.O\.J/i.test(
             headerStr

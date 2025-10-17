@@ -260,7 +260,7 @@ const bonusFile =
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
         
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -362,7 +362,7 @@ const bonusFile =
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      for (let sheetName of workerWorkbook.SheetNames) {
+      for (const sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
         
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -487,7 +487,7 @@ const bonusFile =
         { name: string; grossSalary: number; dept: string }
       > = new Map();
 
-      for (let sheetName of bonusWorkbook.SheetNames) {
+      for (const sheetName of bonusWorkbook.SheetNames) {
         console.log(`📊 Processing bonus: ${sheetName}`);
         const bonusSheet = bonusWorkbook.Sheets[sheetName];
         const bonusData: any[][] = XLSX.utils.sheet_to_json(bonusSheet, {

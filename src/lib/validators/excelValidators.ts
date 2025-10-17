@@ -466,7 +466,7 @@ private detectFileTypeByContent(): string {
         { empId: string; doj: Date | null; rowNum: number }[]
       > = new Map();
 
-      let actualRowNum = isStaff ? 4 : 3;
+      const actualRowNum = isStaff ? 4 : 3;
 
       data.forEach((row: any, index: number) => {
         const rowNum = actualRowNum + index;

@@ -357,7 +357,7 @@ const calculatePercentage = (dateOfJoining: any): number => {
     // Try parsing dd.mm.yy or dd/mm/yy format first
     const ddmmyyMatch = dateOfJoining.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/);
     if (ddmmyyMatch) {
-      let [, day, month, year] = ddmmyyMatch;
+      const [, day, month, year] = ddmmyyMatch;
       let y = parseInt(year);
       if (y < 100) y += 2000; // Convert 21 to 2021
       doj = new Date(y, parseInt(month) - 1, parseInt(day));
@@ -421,7 +421,7 @@ const calculatePercentage = (dateOfJoining: any): number => {
     setError(null);
 
     try {
-      let employeesToIgnoreOctober = new Set<number>();
+      const employeesToIgnoreOctober = new Set<number>();
 
 
       const staffBuffer = await staffFile.arrayBuffer();
@@ -437,7 +437,7 @@ const calculatePercentage = (dateOfJoining: any): number => {
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
@@ -865,7 +865,7 @@ console.log(`Sheet1: Processed ${processedCount} unique STAFF employees (Workers
           /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/
         );
         if (ddmmyyMatch) {
-          let [, day, month, year] = ddmmyyMatch;
+          const [, day, month, year] = ddmmyyMatch;
           let y = parseInt(year);
           if (y < 100) y += 2000;
           date = new Date(y, parseInt(month) - 1, parseInt(day));

@@ -159,8 +159,8 @@ export default function Step8Page() {
       const ddmmyyMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
 
       if (ddmmyyMatch) {
-        let day = parseInt(ddmmyyMatch[1], 10);
-        let month = parseInt(ddmmyyMatch[2], 10);
+        const day = parseInt(ddmmyyMatch[1], 10);
+        const month = parseInt(ddmmyyMatch[2], 10);
         let year = parseInt(ddmmyyMatch[3], 10);
 
         if (year < 100) {
@@ -675,7 +675,7 @@ export default function Step8Page() {
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -1027,7 +1027,7 @@ export default function Step8Page() {
 
   // 🎯 Sorting logic
   useEffect(() => {
-    let sorted = [...comparisonData];
+    const sorted = [...comparisonData];
 
     if (sortConfig.key && sortConfig.direction) {
       sorted.sort((a, b) => {
@@ -1358,7 +1358,7 @@ const calculateGrandTotals = () => {
                       🎯 Adj. Gross Rule:
                     </p>
                     <p className="ml-4 text-purple-800">
-                      Employees in "Per" sheet use <strong>Gross × 60%</strong>{" "}
+                      Employees in &quot;Per&quot; sheet use <strong>Gross × 60%</strong>{" "}
                       for Register calculation
                     </p>
                   </div>
@@ -1379,7 +1379,7 @@ const calculateGrandTotals = () => {
                       🔴 October Exclusion Rule:
                     </p>
                     <p className="ml-4 text-green-800">
-                      Employees in "Average" sheet have{" "}
+                      Employees in &quot;Average&quot; sheet have{" "}
                       <strong>October estimate = 0</strong>
                     </p>
                   </div>

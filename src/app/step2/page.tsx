@@ -1869,7 +1869,7 @@ const handleMoveToStep3 = () => {
       await bonusWb.xlsx.load(await bonusFile.arrayBuffer());
 
       // Load Actual Percentage file if available and extract employee IDs from Average sheet
-      let averageSheetEmployeeIds = new Set<string>();
+      const averageSheetEmployeeIds = new Set<string>();
       if (actualPercentageFileFromContext) {
         const actualPercentageWb = new ExcelJS.Workbook();
         await actualPercentageWb.xlsx.load(

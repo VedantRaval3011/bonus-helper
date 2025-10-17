@@ -400,7 +400,7 @@ export default function Step4Page() {
     setError(null);
 
     try {
-      let employeesToIgnoreOctober = new Set<number>();
+      const employeesToIgnoreOctober = new Set<number>();
 
       if (actualPercentageFile) {
         try {
@@ -499,7 +499,7 @@ export default function Step4Page() {
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
@@ -920,7 +920,7 @@ export default function Step4Page() {
           /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})$/
         );
         if (ddmmyyMatch) {
-          let [, day, month, year] = ddmmyyMatch;
+          const [, day, month, year] = ddmmyyMatch;
           let y = parseInt(year);
           if (y < 100) y += 2000;
           date = new Date(y, parseInt(month) - 1, parseInt(day));

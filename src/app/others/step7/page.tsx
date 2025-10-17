@@ -328,8 +328,8 @@ const bonusFile =
       const ddmmyyMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
 
       if (ddmmyyMatch) {
-        let day = parseInt(ddmmyyMatch[1], 10);
-        let month = parseInt(ddmmyyMatch[2], 10);
+        const day = parseInt(ddmmyyMatch[1], 10);
+        const month = parseInt(ddmmyyMatch[2], 10);
         let year = parseInt(ddmmyyMatch[3], 10);
 
         if (year < 100) {
@@ -659,7 +659,7 @@ const bonusFile =
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -880,7 +880,7 @@ const bonusFile =
 
   // 🎯 NEW: Sorting logic
   useEffect(() => {
-    let sorted = [...comparisonData];
+    const sorted = [...comparisonData];
 
     if (sortConfig.key && sortConfig.direction) {
       sorted.sort((a, b) => {
@@ -972,8 +972,8 @@ const bonusFile =
         const ddmmyyMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
 
         if (ddmmyyMatch) {
-          let day = parseInt(ddmmyyMatch[1], 10);
-          let month = parseInt(ddmmyyMatch[2], 10);
+          const day = parseInt(ddmmyyMatch[1], 10);
+          const  month = parseInt(ddmmyyMatch[2], 10);
           let year = parseInt(ddmmyyMatch[3], 10);
 
           if (year < 100) {
@@ -1227,7 +1227,7 @@ const bonusFile =
                   <p className="font-semibold mb-1">2. GROSS 02:</p>
                   <p className="ml-4">
                     <strong>Formula:</strong> =IF(X=8.33, Q, IF(X&gt;8.33,
-                    Q*0.6, ""))
+                    Q*0.6, &quot;&quot;))
                   </p>
                 </div>
 
@@ -1235,7 +1235,7 @@ const bonusFile =
                   <p className="font-semibold mb-1">3. Actual (Software):</p>
                   <p className="ml-4">
                     <strong>Formula:</strong> =IF(E=8.33, R*E/100, IF(E&gt;8.33,
-                    S*E/100, ""))
+                    S*E/100, &quot;&quot;))
                   </p>
                 </div>
 
@@ -1244,7 +1244,7 @@ const bonusFile =
                     🎯 Custom Percentage Override:
                   </p>
                   <p className="ml-4 text-purple-800">
-                    Employees in "Per" sheet use their specified percentage
+                    Employees in &quot;Per&quot; sheet use their specified percentage
                     instead of calculated
                   </p>
                 </div>
@@ -1254,7 +1254,7 @@ const bonusFile =
                     🔴 Zero October Rule:
                   </p>
                   <p className="ml-4 text-violet-800">
-                    Employees in "Average" sheet have October estimate set to 0
+                    Employees in &quot;Average&quot; sheet have October estimate set to 0
                   </p>
                 </div>
               </div>

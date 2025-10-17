@@ -459,12 +459,12 @@ export default function Step9Page() {
 
       const m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
       if (m) {
-        let [_, d, mo, y] = m;
-        let year = Number(
+        const [_, d, mo, y] = m;
+        const year = Number(
           y.length === 2 ? (Number(y) <= 29 ? "20" + y : "19" + y) : y
         );
-        let month = Number(mo) - 1;
-        let day = Number(d);
+        const month = Number(mo) - 1;
+        const day = Number(d);
         const dt = new Date(Date.UTC(year, month, day));
         return isNaN(dt.getTime()) ? null : dt;
       }
@@ -996,7 +996,7 @@ export default function Step9Page() {
         }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -1131,7 +1131,7 @@ export default function Step9Page() {
         }
       > = new Map();
 
-      for (let sheetName of workerWorkbook.SheetNames) {
+      for (const sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {

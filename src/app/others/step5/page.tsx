@@ -621,7 +621,7 @@ if (bonusWorkbook.SheetNames.length > 0) {
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      for (let sheetName of staffWorkbook.SheetNames) {
+      for (const sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
@@ -730,7 +730,7 @@ if (bonusWorkbook.SheetNames.length > 0) {
         { name: string; dept: string; months: Map<string, number> }
       > = new Map();
 
-      for (let sheetName of workerWorkbook.SheetNames) {
+      for (const sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
 
         if (EXCLUDED_MONTHS.includes(monthKey)) {
