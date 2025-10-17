@@ -63,7 +63,10 @@ export default function Step2Page() {
   const [isComparing, setIsComparing] = useState(false);
   const [comparisonResults, setComparisonResults] =
     useState<ComparisonResults | null>(null);
-  const [monthlyTotals, setMonthlyTotals] = useState<Record<string, MonthlyTotals> | null>(null);
+  const [monthlyTotals, setMonthlyTotals] = useState<Record<
+    string,
+    MonthlyTotals
+  > | null>(null);
   const [activeTab, setActiveTab] = useState<"staff" | "worker">("staff");
   const [isLoadingTab, setIsLoadingTab] = useState(false);
   const [ignoredEmployees, setIgnoredEmployees] = useState<Set<string>>(
@@ -95,16 +98,15 @@ export default function Step2Page() {
     pickFile((s) => s.type === "Indiana-Worker") ??
     pickFile((s) => !!s.file && /worker/i.test(s.file.name));
 
-const bonusFile =
-  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-  pickFile(
-    (s) =>
-      !!s.file &&
-      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
-        s.file.name
-      )
-  );
-
+  const bonusFile =
+    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+    pickFile(
+      (s) =>
+        !!s.file &&
+        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+          s.file.name
+        )
+    );
 
   const generateMonthHeaders = () => {
     const months: string[] = [];
@@ -245,9 +247,9 @@ const bonusFile =
       const monthKey = sheetNameToMonthKey(sheetName);
       if (!monthKey) continue;
 
-      const empIdCol = 2;    // Column B
-      const deptCol = 3;     // Column C
-      const empNameCol = 4;  // Column D
+      const empIdCol = 2; // Column B
+      const deptCol = 3; // Column C
+      const empNameCol = 4; // Column D
       const salary1Col = 11; // Column K (SALARY1)
 
       for (let r = headerRow + 1; r <= ws.rowCount; r++) {
@@ -346,9 +348,9 @@ const bonusFile =
       const monthKey = sheetNameToMonthKey(sheetName);
       if (!monthKey) continue;
 
-      const empIdCol = 2;    // Column B
-      const deptCol = 3;     // Column C
-      const empNameCol = 4;  // Column D
+      const empIdCol = 2; // Column B
+      const deptCol = 3; // Column C
+      const empNameCol = 4; // Column D
       const salary1Col = 11; // Column K (SALARY1)
 
       for (let r = headerRow + 1; r <= ws.rowCount; r++) {
@@ -439,9 +441,9 @@ const bonusFile =
 
     if (headerRow <= 0) return employees;
 
-    const empCodeCol = 2;  // Column B
-    const deptCol = 3;     // Column C
-    const empNameCol = 4;  // Column D
+    const empCodeCol = 2; // Column B
+    const deptCol = 3; // Column C
+    const empNameCol = 4; // Column D
 
     const monthColMap: Record<string, number> = {
       "Nov-24": 6,
@@ -677,7 +679,7 @@ const bonusFile =
             /(NOV|DEC|JAN|FEB|MAR|APR|MAY|JUN|JULY|AUG|SEP)[-\s]?\d{2}/i.test(
               name
             ) &&
-            /SP/i.test(name) &&
+            (/SP/i.test(name) || /NUTRA/i.test(name) || /NRTM/i.test(name)) && // Accept both SP and NUTRA
             !/OCT/i.test(name)
         );
 
@@ -688,7 +690,7 @@ const bonusFile =
             /(NOV|DEC|JAN|FEB|MAR|APR|MAY|JUN|JULY|AUG|SEP)[-\s]?\d{2}/i.test(
               name
             ) &&
-            /SP/i.test(name) &&
+            (/SP/i.test(name) || /NUTRA/i.test(name) || /NRTM/i.test(name)) && // ✅ Accept both SP and NUTRA
             !/OCT/i.test(name)
         );
 
@@ -1007,10 +1009,7 @@ const bonusFile =
       };
 
       // HR row
-      const hrRow = [
-        "HR (Sci-Prc-Final)",
-        ...months.map((m) => monthlyTotals[m]?.hr || 0),
-      ];
+      const hrRow = ["HR", ...months.map((m) => monthlyTotals[m]?.hr || 0)];
       ws.addRow(hrRow);
       ws.getRow(3).fill = {
         type: "pattern",
@@ -1439,7 +1438,7 @@ const bonusFile =
                     </tr>
                     <tr className="bg-white">
                       <td className="border border-gray-300 px-3 py-2 font-semibold">
-                        HR (Sci-Prc-Final)
+                        HR
                       </td>
                       {generateMonthHeaders().map((m) => (
                         <td
@@ -1571,9 +1570,7 @@ const bonusFile =
                                 Software
                               </th>
                               <th className="border px-1 py-1 text-xs">HR</th>
-                              <th className="border px-1 py-1 text-xs">
-                                Diff
-                              </th>
+                              <th className="border px-1 py-1 text-xs">Diff</th>
                             </React.Fragment>
                           ))}
                           <th className="border px-3 py-1"></th>
@@ -1669,13 +1666,11 @@ const bonusFile =
                                 const hasDiff = Math.abs(diff) > 1;
 
                                 const monthDept =
-                                  emp.monthlyDepartments?.[m] ||
-                                  emp.department;
+                                  emp.monthlyDepartments?.[m] || emp.department;
                                 const shouldIgnoreThisMonth =
                                   ["C", "A"].includes(
                                     monthDept.toUpperCase()
-                                  ) ||
-                                  emp.employeeCode.toUpperCase() === "N";
+                                  ) || emp.employeeCode.toUpperCase() === "N";
 
                                 const shouldGreyOut =
                                   isIgnoredEmployee && shouldIgnoreThisMonth;
@@ -1700,9 +1695,7 @@ const bonusFile =
                                           : ""
                                       }`}
                                     >
-                                      {hrSal > 0
-                                        ? hrSal.toLocaleString()
-                                        : "-"}
+                                      {hrSal > 0 ? hrSal.toLocaleString() : "-"}
                                     </td>
                                     <td
                                       className={`border px-2 py-1 text-right text-xs font-medium ${

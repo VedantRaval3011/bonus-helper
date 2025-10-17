@@ -206,15 +206,15 @@ export default function Step7Page() {
     pickFile((s) => s.type === "Indiana-Staff") ??
     pickFile((s) => !!s.file && /staff/i.test(s.file.name));
 
-  const bonusFile =
-    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-    pickFile(
-      (s) =>
-        !!s.file &&
-        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet/i.test(
-          s.file.name
-        )
-    );
+const bonusFile =
+  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+  pickFile(
+    (s) =>
+      !!s.file &&
+      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+        s.file.name
+      )
+  );
 
   const actualPercentageFile =
     pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??

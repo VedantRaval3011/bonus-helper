@@ -36,11 +36,9 @@ export default function Step9Page() {
   const [departmentFilter, setDepartmentFilter] = useState<string>("All");
   const [eligibilityFilter, setEligibilityFilter] = useState<string>("All");
 
-  // 🎯 Sorting state
   const [sortColumn, setSortColumn] = useState<SortableColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
-  // === Step 9 Audit Helpers ===
   const TOLERANCE_STEP9 = 12;
 
   async function postAuditMessagesStep9(items: any[], batchId?: string) {
@@ -302,17 +300,17 @@ export default function Step9Page() {
     pickFile((s) => s.type === "Indiana-Worker") ??
     pickFile((s) => !!s.file && /worker/i.test(s.file.name));
 
-const bonusFile =
-  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-  pickFile(
-    (s) =>
-      !!s.file &&
-      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
-        s.file.name
-      )
-  );
+  const bonusFile =
+    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+    pickFile(
+      (s) =>
+        !!s.file &&
+        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+          s.file.name
+        )
+    );
 
-
+  // OPTIONAL now: Actual Percentage file
   const actualPercentageFile =
     pickFile((s) => s.type === "Actual-Percentage-Bonus-Data") ??
     pickFile((s) => !!s.file && /actual.*percentage/i.test(s.file.name));
@@ -335,11 +333,9 @@ const bonusFile =
     if (cell == null || cell === "") {
       return { hasValue: false, value: 0 };
     }
-
     if (typeof cell === "number") {
       return { hasValue: true, value: cell };
     }
-
     if (typeof cell === "string") {
       const trimmed = cell.trim();
       if (!trimmed || trimmed === "-") {
@@ -351,7 +347,6 @@ const bonusFile =
       }
       return { hasValue: false, value: 0 };
     }
-
     return { hasValue: false, value: 0 };
   };
 
@@ -436,42 +431,66 @@ const bonusFile =
     937, 1039, 1065, 1105, 59, 161,
   ]);
 
-  const DEFAULT_PERCENTAGE = 8.33;
-  const SPECIAL_PERCENTAGE = 12.0;
   const SPECIAL_GROSS_MULTIPLIER = 0.6;
   const TOLERANCE = 12;
 
-  const referenceDate = new Date(Date.UTC(2025, 9, 30));
+  // Reference date: October 30, 2025
+  const referenceDate = new Date(Date.UTC(2025, 9, 30)); // Month is 0-indexed, so 9 = October
 
   function parseDOJ(raw: any): Date | null {
     if (raw == null || raw === "") return null;
 
+    // Handle Excel serial date numbers
     if (typeof raw === "number") {
-      const excelEpoch = Date.UTC(1899, 11, 30);
-      return new Date(excelEpoch + raw * 86400000);
+      const excelEpoch = new Date(1899, 11, 30);
+      return new Date(excelEpoch.getTime() + raw * 86400000);
     }
 
     if (typeof raw === "string") {
       let s = raw.trim();
 
-      if (/\d{4}-\d{2}-\d{2}\s+\d/.test(s)) {
+      // Remove time portion if present
+      if (
+        /\d{4}-\d{2}-\d{2}\s+\d/.test(s) ||
+        /\d{1,2}\.\d{1,2}\.\d{2,4}\s+\d/.test(s)
+      ) {
         s = s.split(/\s+/)[0];
       }
 
-      s = s.replace(/[.\/]/g, "-");
+      // Handle DD.MM.YYYY or DD.MM.YY format (with dots - common in Excel)
+      const ddmmyyyyDots = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/.exec(s);
+      if (ddmmyyyyDots) {
+        let day = parseInt(ddmmyyyyDots[1], 10);
+        let month = parseInt(ddmmyyyyDots[2], 10);
+        let year = parseInt(ddmmyyyyDots[3], 10);
 
-      const m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
-      if (m) {
-        let [_, d, mo, y] = m;
-        let year = Number(
-          y.length === 2 ? (Number(y) <= 29 ? "20" + y : "19" + y) : y
-        );
-        let month = Number(mo) - 1;
-        let day = Number(d);
-        const dt = new Date(Date.UTC(year, month, day));
-        return isNaN(dt.getTime()) ? null : dt;
+        // Handle 2-digit years
+        if (year < 100) {
+          year += year < 50 ? 2000 : 1900;
+        }
+
+        return new Date(year, month - 1, day);
       }
 
+      // Normalize separators to hyphens for other formats
+      s = s.replace(/[.\/]/g, "-");
+
+      // Match DD-MM-YYYY or DD-MM-YY format
+      const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(s);
+      if (ddmmyyyy) {
+        let day = parseInt(ddmmyyyy[1], 10);
+        let month = parseInt(ddmmyyyy[2], 10);
+        let year = parseInt(ddmmyyyy[3], 10);
+
+        // Handle 2-digit years
+        if (ddmmyyyy[3].length === 2) {
+          year += year <= 29 ? 2000 : 1900;
+        }
+
+        return new Date(year, month - 1, day);
+      }
+
+      // Match YYYY-MM-DD format
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
         const dt = new Date(s + "T00:00:00Z");
         return isNaN(dt.getTime()) ? null : dt;
@@ -482,26 +501,35 @@ const bonusFile =
   }
 
   function monthsBetween(start: Date, end: Date): number {
-    const sy = start.getUTCFullYear();
-    const sm = start.getUTCMonth();
-    const sd = start.getUTCDate();
-    const ey = end.getUTCFullYear();
-    const em = end.getUTCMonth();
-    const ed = end.getUTCDate();
+    const startYear = start.getFullYear();
+    const startMonth = start.getMonth();
+    const startDay = start.getDate();
 
-    let months = (ey - sy) * 12 + (em - sm);
+    const endYear = end.getFullYear();
+    const endMonth = end.getMonth();
+    const endDay = end.getDate();
 
-    if (ed < sd) {
-      months -= 1;
+    // Calculate total months difference
+    let totalMonths = (endYear - startYear) * 12 + (endMonth - startMonth);
+
+    // If the end day is before the start day, subtract one month
+    // This ensures we only count complete months
+    if (endDay < startDay) {
+      totalMonths -= 1;
     }
 
-    return Math.max(0, months);
+    return Math.max(0, totalMonths);
   }
 
   const calculateMonthsOfService = (dateOfJoining: any): number => {
+    if (!dateOfJoining) return 0;
     const doj = parseDOJ(dateOfJoining);
-    if (!doj) return 0;
-    return monthsBetween(doj, referenceDate);
+    if (!doj || isNaN(doj.getTime())) {
+      console.warn(`Failed to parse DOJ: ${dateOfJoining}`);
+      return 0;
+    }
+    const months = monthsBetween(doj, referenceDate);
+    return months;
   };
 
   const calculateGross2 = (grossSal: number, percentage: number): number => {
@@ -520,7 +548,6 @@ const bonusFile =
     percentage: number
   ): number => {
     const pct = Number(percentage);
-
     if (pct === 8.33) {
       return (grossSal * pct) / 100;
     } else if (pct > 8.33) {
@@ -531,15 +558,17 @@ const bonusFile =
   };
 
   const processFiles = async () => {
+    // Only 5 files required now (Actual Percentage optional)
     if (
       !staffFile ||
       !workerFile ||
       !bonusFile ||
-      !actualPercentageFile ||
       !dueVoucherFile ||
       !loanDeductionFile
     ) {
-      setError("All six files are required for processing");
+      setError(
+        "Required files: Staff, Worker, Bonus, Due Voucher, Loan Deduction"
+      );
       return;
     }
 
@@ -548,108 +577,99 @@ const bonusFile =
 
     try {
       console.log("=".repeat(60));
-      console.log(
-        "📊 STEP 9: Final RTGS Comparison (with Actual + Reim columns + GrandTotal)"
-      );
+      console.log("📊 STEP 9: Final RTGS Comparison (Actual optional)");
       console.log("=".repeat(60));
       console.log(
         "⚡ FORMULA: Register - Unpaid - Loan - Already Paid = Final RTGS"
       );
-      console.log("⚡ 12% employees: (Step3-Gross × 60%) × 12% = Register");
+      console.log(
+        "⚡ 12% employees: (Step3-Gross × 60%) × 12% = Register when custom % exists"
+      );
       console.log("📌 8.33% employees: Step3-Gross × 8.33% = Register");
-      console.log("📌 Actual (Step 7) & Reim (Step 8) columns added");
-      console.log("🔴 Reim set to 0 for Already Paid or Unpaid employees");
+      console.log(
+        "📌 Actual (Step 7) & Reim (Step 8) columns included; Reim zeroed for Paid/Unpaid and all Workers"
+      );
 
-      // ========== LOAD LOAN DEDUCTION DATA ==========
+      // LOAN DEDUCTION
       const loanBuffer = await loanDeductionFile.arrayBuffer();
       const loanWorkbook = XLSX.read(loanBuffer);
       const loanSheet = loanWorkbook.Sheets[loanWorkbook.SheetNames[0]];
       const loanData: any[][] = XLSX.utils.sheet_to_json(loanSheet, {
         header: 1,
       });
-
       const loanMap: Map<number, number> = new Map();
       const loanHeaderRow = 1;
       const empIdIdx = 1;
       const loanIdx = 5;
-
       for (let i = loanHeaderRow + 1; i < loanData.length; i++) {
         const row = loanData[i];
         if (!row || row.length === 0) continue;
-
         const empId = Number(row[empIdIdx]);
         const loanAmount = Number(row[loanIdx]) || 0;
-
         if (empId && !isNaN(empId) && loanAmount > 0) {
           loanMap.set(empId, loanAmount);
-          console.log(`💰 Loan: Emp ${empId} = ₹${loanAmount}`);
         }
       }
 
-      console.log(`✅ Loan deduction data loaded: ${loanMap.size} employees`);
-
-      // ========== LOAD ACTUAL PERCENTAGE DATA ==========
-      const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
-      const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
-      const actualPercentageSheet =
-        actualPercentageWorkbook.Sheets[actualPercentageWorkbook.SheetNames[0]];
-      const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
-        actualPercentageSheet,
-        { header: 1 }
-      );
-
+      // OPTIONAL: ACTUAL PERCENTAGE FILE
       const customPercentageMap = new Map<number, number>();
-      let headerRow = -1;
       const actualPercentageEmployees = new Set<number>();
 
-      for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
-        if (
-          actualPercentageData[i] &&
-          actualPercentageData[i].some((v: any) => {
-            const t = norm(v);
-            return t === "EMPCODE" || t === "EMPLOYEECODE";
-          })
-        ) {
-          headerRow = i;
-          break;
+      if (actualPercentageFile) {
+        const actualPercentageBuffer = await actualPercentageFile.arrayBuffer();
+        const actualPercentageWorkbook = XLSX.read(actualPercentageBuffer);
+        const actualPercentageSheet =
+          actualPercentageWorkbook.Sheets[
+            actualPercentageWorkbook.SheetNames[0]
+          ];
+        const actualPercentageData: any[][] = XLSX.utils.sheet_to_json(
+          actualPercentageSheet,
+          {
+            header: 1,
+          }
+        );
+
+        let headerRow = -1;
+        for (let i = 0; i < Math.min(10, actualPercentageData.length); i++) {
+          if (
+            actualPercentageData[i] &&
+            actualPercentageData[i].some((v: any) => {
+              const t = norm(v);
+              return t === "EMPCODE" || t === "EMPLOYEECODE";
+            })
+          ) {
+            headerRow = i;
+            break;
+          }
         }
-      }
 
-      if (headerRow !== -1) {
-        const headers = actualPercentageData[headerRow];
-        const empCodeIdx = headers.findIndex((h: any) =>
-          ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
-        );
-        const percentageIdx = headers.findIndex((h: any) =>
-          /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
-        );
+        if (headerRow !== -1) {
+          const headers = actualPercentageData[headerRow];
+          const empCodeIdx = headers.findIndex((h: any) =>
+            ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
+          );
+          const percentageIdx = headers.findIndex((h: any) =>
+            /BONUS.*PERCENTAGE|PERCENTAGE/i.test(String(h ?? ""))
+          );
 
-        if (empCodeIdx !== -1 && percentageIdx !== -1) {
-          for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
-            const row = actualPercentageData[i];
-            if (!row || row.length === 0) continue;
-
-            const empCode = Number(row[empCodeIdx]);
-            const percentage = Number(row[percentageIdx]);
-
-            if (!isNaN(empCode)) {
-              actualPercentageEmployees.add(empCode);
-            }
-            if (!isNaN(empCode) && !isNaN(percentage) && percentage > 0) {
-              customPercentageMap.set(empCode, Number(percentage));
+          if (empCodeIdx !== -1 && percentageIdx !== -1) {
+            for (let i = headerRow + 1; i < actualPercentageData.length; i++) {
+              const row = actualPercentageData[i];
+              if (!row || row.length === 0) continue;
+              const empCode = Number(row[empCodeIdx]);
+              const percentage = Number(row[percentageIdx]);
+              if (!isNaN(empCode)) {
+                actualPercentageEmployees.add(empCode);
+              }
+              if (!isNaN(empCode) && !isNaN(percentage) && percentage > 0) {
+                customPercentageMap.set(empCode, Number(percentage));
+              }
             }
           }
         }
       }
 
-      console.log(
-        `✅ Custom percentage data loaded: ${customPercentageMap.size} employees`
-      );
-      console.log(
-        `✅ Actual percentage employees identified: ${actualPercentageEmployees.size}`
-      );
-
-      // ========== LOAD DUE VOUCHER DATA ==========
+      // DUE VOUCHER
       const dueVoucherBuffer = await dueVoucherFile.arrayBuffer();
       const dueVoucherWorkbook = XLSX.read(dueVoucherBuffer);
       const dueVoucherSheet =
@@ -658,10 +678,8 @@ const bonusFile =
         dueVoucherSheet,
         { header: 1 }
       );
-
       const dueVCMap: Map<number, number> = new Map();
       let dueVCHeaderRow = -1;
-
       for (let i = 0; i < Math.min(10, dueVoucherData.length); i++) {
         if (
           dueVoucherData[i] &&
@@ -674,7 +692,6 @@ const bonusFile =
           break;
         }
       }
-
       if (dueVCHeaderRow !== -1) {
         const headers = dueVoucherData[dueVCHeaderRow];
         const empCodeIdx = headers.findIndex((h: any) =>
@@ -683,15 +700,12 @@ const bonusFile =
         const dueVCIdx = headers.findIndex((h: any) =>
           /DUE.*VC|DUEVC/i.test(norm(h))
         );
-
         if (empCodeIdx !== -1 && dueVCIdx !== -1) {
           for (let i = dueVCHeaderRow + 1; i < dueVoucherData.length; i++) {
             const row = dueVoucherData[i];
             if (!row || row.length === 0) continue;
-
             const empCode = Number(row[empCodeIdx]);
             const dueVC = Number(row[dueVCIdx]) || 0;
-
             if (empCode && !isNaN(empCode)) {
               dueVCMap.set(empCode, dueVC);
             }
@@ -699,296 +713,12 @@ const bonusFile =
         }
       }
 
-      console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
-
-      // ========== 🆕 LOAD "ALREADY PAID" (PAID) DATA FROM BONUS FILE ==========
-      const alreadyPaidMap: Map<number, { paid: number; sheets: string[] }> =
-        new Map();
-      const bonusBuffer = await bonusFile.arrayBuffer();
-      const bonusWorkbook = XLSX.read(bonusBuffer);
-
-      console.log("\n💳 LOADING 'ALREADY PAID' (PAID) DATA FROM BONUS SHEETS");
-      console.log("=".repeat(60));
-
-      for (const sheetName of bonusWorkbook.SheetNames) {
-        if (sheetName === "Loan Ded.") {
-          console.log(`⏭️ Skipping sheet: ${sheetName}`);
-          continue;
-        }
-
-        console.log(`📄 Processing Bonus sheet for Paid: ${sheetName}`);
-        const sheet = bonusWorkbook.Sheets[sheetName];
-        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-        });
-
-        let sheetHeaderRow = -1;
-        for (let i = 0; i < Math.min(10, sheetData.length); i++) {
-          if (
-            sheetData[i] &&
-            sheetData[i].some((v: any) => {
-              const t = norm(v);
-              return t === "EMPCODE" || t === "EMPLOYEECODE";
-            })
-          ) {
-            sheetHeaderRow = i;
-            break;
-          }
-        }
-
-        if (sheetHeaderRow === -1) {
-          console.log(`⚠️ No header found in ${sheetName}`);
-          continue;
-        }
-
-        const headers = sheetData[sheetHeaderRow];
-        const empCodeIdx = headers.findIndex((h: any) =>
-          ["EMPCODE", "EMPLOYEECODE", "EMP CODE"].includes(
-            String(h ?? "")
-              .trim()
-              .toUpperCase()
-              .replace(/\s+/g, "")
-          )
-        );
-
-        const alreadyPaidIdx = headers.findIndex((h: any) =>
-          /^ALREADY\s*PAID$/i.test(String(h ?? "").trim())
-        );
-
-        if (empCodeIdx === -1 || alreadyPaidIdx === -1) {
-          console.log(
-            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, Paid: ${alreadyPaidIdx})`
-          );
-          continue;
-        }
-
-        console.log(
-          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Paid at ${alreadyPaidIdx}`
-        );
-
-        let recordsInSheet = 0;
-        for (let i = sheetHeaderRow + 1; i < sheetData.length; i++) {
-          const row = sheetData[i];
-          if (!row || row.length === 0) continue;
-
-          const empCodeRaw = row[empCodeIdx];
-          const paidRaw = row[alreadyPaidIdx];
-
-          if (
-            empCodeRaw == null ||
-            empCodeRaw === "" ||
-            paidRaw == null ||
-            paidRaw === ""
-          )
-            continue;
-
-          const empCode = Number(empCodeRaw);
-          const paid = Number(paidRaw);
-
-          if (isNaN(empCode) || isNaN(paid)) continue;
-
-          recordsInSheet++;
-
-          const alreadyPaid =
-            alreadyPaidIdx !== -1 ? Number(row[alreadyPaidIdx]) || 0 : 0;
-          if (!alreadyPaidMap.has(empCode)) {
-            alreadyPaidMap.set(empCode, {
-              paid: alreadyPaid,
-              sheets: [sheetName],
-            });
-          } else {
-            const ex = alreadyPaidMap.get(empCode)!;
-            ex.paid += alreadyPaid;
-            ex.sheets.push(sheetName);
-          }
-
-          console.log(
-            `     Emp ${empCode}: Adding Paid ${paid.toFixed(
-              2
-            )} from ${sheetName} (Total: ${alreadyPaidMap
-              .get(empCode)!
-              .paid.toFixed(2)})`
-          );
-        }
-
-        console.log(
-          `   Processed ${recordsInSheet} Paid records from ${sheetName}`
-        );
-      }
-
-      console.log(
-        `\n✅ Already Paid data loaded: ${alreadyPaidMap.size} employees`
-      );
-
-      // 🆕 CREATE SETS FOR ALREADY PAID AND UNPAID EMPLOYEES
-      const alreadyPaidEmployees = new Set<number>();
-      const unpaidEmployees = new Set<number>();
-
-      // Populate alreadyPaidEmployees from alreadyPaidMap
-      for (const [empId, data] of alreadyPaidMap) {
-        if ((data.paid || 0) > 0) alreadyPaidEmployees.add(empId);
-      }
-
-      // 🆕 IDENTIFY UNPAID EMPLOYEES FROM DUE VOUCHER
-      console.log("\n💼 IDENTIFYING UNPAID EMPLOYEES FROM DUE VOUCHER");
-      console.log("=".repeat(60));
-
-      for (const [empId, dueVC] of dueVCMap) {
-        if (dueVC > 0) {
-          unpaidEmployees.add(empId);
-          console.log(
-            `🔴 Emp ${empId} marked as UNPAID - Due VC: ₹${dueVC.toFixed(2)}`
-          );
-        }
-      }
-
-      console.log(`✅ Unpaid employees identified: ${unpaidEmployees.size}`);
-      console.log(
-        `✅ Already Paid employees identified: ${alreadyPaidEmployees.size}`
-      );
-
-      // ========== LOAD BONUS FILE FOR FINAL RTGS (HR) ==========
-      const hrFinalRTGSData: Map<
-        number,
-        { finalRTGS: number; sheets: string[] }
-      > = new Map();
-
-      console.log("\n💼 LOADING FINAL RTGS DATA FROM BONUS SHEETS");
-      console.log("=".repeat(60));
-
-      for (const sheetName of bonusWorkbook.SheetNames) {
-        if (sheetName === "Loan Ded.") {
-          console.log(`⏭️ Skipping sheet: ${sheetName}`);
-          continue;
-        }
-
-        console.log(`📄 Processing Bonus sheet for Final RTGS: ${sheetName}`);
-        const sheet = bonusWorkbook.Sheets[sheetName];
-        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-        });
-
-        let sheetHeaderRow = -1;
-        for (let i = 0; i < Math.min(10, sheetData.length); i++) {
-          if (
-            sheetData[i] &&
-            sheetData[i].some((v: any) => {
-              const t = norm(v);
-              return t === "EMPCODE" || t === "EMPLOYEECODE";
-            })
-          ) {
-            sheetHeaderRow = i;
-            break;
-          }
-        }
-
-        if (sheetHeaderRow === -1) {
-          console.log(`⚠️ No header found in ${sheetName}`);
-          continue;
-        }
-
-        const headers = sheetData[sheetHeaderRow];
-        const empCodeIdx = headers.findIndex((h: any) =>
-          ["EMPCODE", "EMPLOYEECODE", "EMP CODE"].includes(
-            String(h ?? "")
-              .trim()
-              .toUpperCase()
-              .replace(/\s+/g, "")
-          )
-        );
-
-        const finalRTGSIdx = headers.findIndex((h: any) => {
-          const headerStr = String(h ?? "")
-            .trim()
-            .toUpperCase();
-          return (
-            headerStr === "FINAL RTGS" ||
-            headerStr === "FINALRTGS" ||
-            headerStr === "FINAL RTGS.1" ||
-            /FINAL.*RTGS/i.test(headerStr)
-          );
-        });
-
-        if (empCodeIdx === -1 || finalRTGSIdx === -1) {
-          console.log(
-            `⚠️ Required columns not found in ${sheetName} (Emp: ${empCodeIdx}, RTGS: ${finalRTGSIdx})`
-          );
-          continue;
-        }
-
-        console.log(
-          `  ✓ Found columns - EmpCode at ${empCodeIdx}, Final RTGS at ${finalRTGSIdx}`
-        );
-
-        let recordsInSheet = 0;
-        for (let i = sheetHeaderRow + 1; i < sheetData.length; i++) {
-          const row = sheetData[i];
-          if (!row || row.length === 0) continue;
-
-          const empCodeRaw = row[empCodeIdx];
-          const finalRTGSRaw = row[finalRTGSIdx];
-
-          if (
-            empCodeRaw == null ||
-            empCodeRaw === "" ||
-            finalRTGSRaw == null ||
-            finalRTGSRaw === ""
-          )
-            continue;
-
-          const empCode = Number(empCodeRaw);
-          const finalRTGS = Number(finalRTGSRaw);
-
-          if (isNaN(empCode) || isNaN(finalRTGS)) continue;
-
-          recordsInSheet++;
-
-          if (!hrFinalRTGSData.has(empCode)) {
-            hrFinalRTGSData.set(empCode, {
-              finalRTGS: finalRTGS,
-              sheets: [sheetName],
-            });
-          } else {
-            const existing = hrFinalRTGSData.get(empCode)!;
-            existing.finalRTGS += finalRTGS;
-            existing.sheets.push(sheetName);
-          }
-
-          console.log(
-            `     Emp ${empCode}: Adding ${finalRTGS.toFixed(
-              2
-            )} from ${sheetName} (Total: ${hrFinalRTGSData
-              .get(empCode)!
-              .finalRTGS.toFixed(2)})`
-          );
-        }
-
-        console.log(`   Processed ${recordsInSheet} records from ${sheetName}`);
-      }
-
-      const multiSheetEmployees = Array.from(hrFinalRTGSData.entries()).filter(
-        ([_, data]) => data.sheets.length > 1
-      );
-
-      console.log(
-        `\n⚠️ Employees appearing in multiple sheets: ${multiSheetEmployees.length}`
-      );
-      multiSheetEmployees.forEach(([empId, data]) => {
-        console.log(
-          `   Emp ${empId}: ₹${data.finalRTGS.toFixed(
-            2
-          )} across ${data.sheets.join(", ")}`
-        );
-      });
-
-      console.log(
-        `\n✅ HR Final RTGS data loaded: ${hrFinalRTGSData.size} employees`
-      );
-
-      // ========== COMPUTE GROSS SALARY ==========
+      // ===== STEP 1: PROCESS STAFF/WORKER FILES FIRST =====
+      console.log("\n📋 STEP 1: Processing Staff/Worker files for DOJ data...");
+      
+      // BUILD SOFTWARE GROSS FROM STAFF FILE
       const staffBuffer = await staffFile.arrayBuffer();
       const staffWorkbook = XLSX.read(staffBuffer);
-
       const staffEmployees: Map<
         number,
         {
@@ -1001,20 +731,9 @@ const bonusFile =
 
       for (let sheetName of staffWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+        if (EXCLUDED_MONTHS.includes(monthKey)) continue;
+        if (!AVG_WINDOW.includes(monthKey)) continue;
 
-        if (EXCLUDED_MONTHS.includes(monthKey)) {
-          console.log(`⏭️ SKIP Staff ${sheetName} (${monthKey} - EXCLUDED)`);
-          continue;
-        }
-
-        if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(
-            `⏭️ SKIP Staff ${sheetName} (${monthKey} - NOT IN WINDOW)`
-          );
-          continue;
-        }
-
-        console.log(`📄 Processing Staff ${sheetName} - ${monthKey}`);
         const sheet = staffWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -1031,7 +750,6 @@ const bonusFile =
             break;
           }
         }
-
         if (headerIdx === -1) continue;
 
         const headers = data[headerIdx];
@@ -1053,6 +771,7 @@ const bonusFile =
           );
         });
 
+        // Fallback logic for DOJ
         if (dojIdx === -1) {
           for (
             let i = Math.max(0, headers.length - 3);
@@ -1073,13 +792,12 @@ const bonusFile =
           }
         }
 
+        // If still not found and we have enough columns, use the last column
         if (dojIdx === -1 && headers.length >= 15) {
           dojIdx = headers.length - 1;
         }
 
-        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) {
-          continue;
-        }
+        if (empIdIdx === -1 || empNameIdx === -1 || salary1Idx === -1) continue;
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -1101,11 +819,14 @@ const bonusFile =
               months: new Map(),
               dateOfJoining: doj,
             });
+            if (doj) {
+              console.log(
+                `✅ Stored Staff Emp ${empId} with DOJ: ${JSON.stringify(doj)}`
+              );
+            }
           }
-
           const emp = staffEmployees.get(empId)!;
           const existing = emp.months.get(monthKey);
-
           if (existing) {
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
@@ -1119,11 +840,9 @@ const bonusFile =
         }
       }
 
-      console.log(`\n✅ Staff employees: ${staffEmployees.size}`);
-
+      // BUILD SOFTWARE GROSS FROM WORKER FILE
       const workerBuffer = await workerFile.arrayBuffer();
       const workerWorkbook = XLSX.read(workerBuffer);
-
       const workerEmployees: Map<
         number,
         {
@@ -1136,20 +855,9 @@ const bonusFile =
 
       for (let sheetName of workerWorkbook.SheetNames) {
         const monthKey = parseMonthFromSheetName(sheetName) ?? "unknown";
+        if (EXCLUDED_MONTHS.includes(monthKey)) continue;
+        if (!AVG_WINDOW.includes(monthKey)) continue;
 
-        if (EXCLUDED_MONTHS.includes(monthKey)) {
-          console.log(`⏭️ SKIP Worker ${sheetName} (${monthKey} - EXCLUDED)`);
-          continue;
-        }
-
-        if (!AVG_WINDOW.includes(monthKey)) {
-          console.log(
-            `⏭️ SKIP Worker ${sheetName} (${monthKey} - NOT IN WINDOW)`
-          );
-          continue;
-        }
-
-        console.log(`📄 Processing Worker ${sheetName} - ${monthKey}`);
         const sheet = workerWorkbook.Sheets[sheetName];
         const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
@@ -1160,7 +868,6 @@ const bonusFile =
             break;
           }
         }
-
         if (headerIdx === -1) continue;
 
         const headers = data[headerIdx];
@@ -1179,7 +886,6 @@ const bonusFile =
           );
         });
         const salary1Idx = 8;
-
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
           return /DATE\s*OF\s*JOINING|DOJ|JOINING\s*DATE|DATE\s*JOINING|D\.O\.J/i.test(
@@ -1187,13 +893,7 @@ const bonusFile =
           );
         });
 
-        if (dojIdx === -1 && headers.length >= 15) {
-          dojIdx = headers.length - 1;
-        }
-
-        if (empIdIdx === -1 || empNameIdx === -1) {
-          continue;
-        }
+        if (empIdIdx === -1 || empNameIdx === -1) continue;
 
         for (let i = headerIdx + 1; i < data.length; i++) {
           const row = data[i];
@@ -1205,6 +905,20 @@ const bonusFile =
             .toUpperCase();
           const salary1Result = getCellValue(row[salary1Idx]);
           const doj = dojIdx !== -1 && row.length > dojIdx ? row[dojIdx] : null;
+          
+          if (empId && doj) {
+            console.log(
+              `🔍 Worker Emp ${empId}: Raw DOJ = ${JSON.stringify(
+                doj
+              )} (type: ${typeof doj})`
+            );
+            const testParse = parseDOJ(doj);
+            console.log(`   Parsed DOJ = ${testParse}`);
+            if (testParse) {
+              const testMonths = monthsBetween(testParse, referenceDate);
+              console.log(`   Calculated MOS = ${testMonths} months`);
+            }
+          }
 
           if (deptIdx !== -1) {
             const dept = String(row[deptIdx] || "")
@@ -1224,11 +938,14 @@ const bonusFile =
               months: new Map(),
               dateOfJoining: doj,
             });
+            if (doj) {
+              console.log(
+                `✅ Stored Worker Emp ${empId} with DOJ: ${JSON.stringify(doj)}`
+              );
+            }
           }
-
           const emp = workerEmployees.get(empId)!;
           const existing = emp.months.get(monthKey);
-
           if (existing) {
             if (salary1Result.hasValue) {
               emp.months.set(monthKey, {
@@ -1242,17 +959,284 @@ const bonusFile =
         }
       }
 
-      console.log(`\n✅ Worker employees: ${workerEmployees.size}`);
+      // ===== STEP 2: BUILD DOJ MAP =====
+      console.log("\n📋 STEP 2: Building DOJ map from processed Staff/Worker data...");
+      const employeeDOJMap = new Map<number, any>();
 
-      // ========== COMPUTE SOFTWARE TOTALS WITH OCTOBER ESTIMATION ==========
+      for (const [empId, empData] of staffEmployees) {
+        if (empData.dateOfJoining) {
+          employeeDOJMap.set(empId, empData.dateOfJoining);
+          console.log(`✅ Staff Emp ${empId}: DOJ = ${JSON.stringify(empData.dateOfJoining)}`);
+        }
+      }
+
+      for (const [empId, empData] of workerEmployees) {
+        if (empData.dateOfJoining) {
+          employeeDOJMap.set(empId, empData.dateOfJoining);
+          console.log(`✅ Worker Emp ${empId}: DOJ = ${JSON.stringify(empData.dateOfJoining)}`);
+        }
+      }
+
+      console.log(`📊 Total employees with DOJ: ${employeeDOJMap.size}`);
+
+      // ===== STEP 3: PROCESS BONUS FILE (WITH DOJ FROM MAP) =====
+      console.log("\n📋 STEP 3: Processing Bonus file with DOJ from Staff/Worker...");
+      
+      // Already Paid from Bonus and HR Final RTGS from Bonus
+      const alreadyPaidMap: Map<number, { paid: number; sheets: string[] }> =
+        new Map();
+      const bonusBuffer = await bonusFile.arrayBuffer();
+      const bonusWorkbook = XLSX.read(bonusBuffer);
+
+      // Collect Already Paid
+      for (const sheetName of bonusWorkbook.SheetNames) {
+        if (sheetName === "Loan Ded.") continue;
+        const sheet = bonusWorkbook.Sheets[sheetName];
+        const sheetData: any[][] = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+        });
+        let sheetHeaderRow = -1;
+        for (let i = 0; i < Math.min(10, sheetData.length); i++) {
+          if (
+            sheetData[i] &&
+            sheetData[i].some((v: any) => {
+              const t = norm(v);
+              return t === "EMPCODE" || t === "EMPLOYEECODE";
+            })
+          ) {
+            sheetHeaderRow = i;
+            break;
+          }
+        }
+        if (sheetHeaderRow === -1) continue;
+
+        const headers = sheetData[sheetHeaderRow];
+        const empCodeIdx = headers.findIndex((h: any) =>
+          ["EMPCODE", "EMPLOYEECODE", "EMP CODE"]
+            .map((x) => x.replace(/\s+/g, ""))
+            .includes(
+              String(h ?? "")
+                .trim()
+                .toUpperCase()
+                .replace(/\s+/g, "")
+            )
+        );
+        const alreadyPaidIdx = headers.findIndex((h: any) =>
+          /^ALREADY\s*PAID$/i.test(String(h ?? "").trim())
+        );
+        if (empCodeIdx === -1 || alreadyPaidIdx === -1) continue;
+
+        for (let i = sheetHeaderRow + 1; i < sheetData.length; i++) {
+          const row = sheetData[i];
+          if (!row || row.length === 0) continue;
+          const empCodeRaw = row[empCodeIdx];
+          const paidRaw = row[alreadyPaidIdx];
+          if (
+            empCodeRaw == null ||
+            empCodeRaw === "" ||
+            paidRaw == null ||
+            paidRaw === ""
+          )
+            continue;
+
+          const empCode = Number(empCodeRaw);
+          const paid = Number(paidRaw);
+          if (isNaN(empCode) || isNaN(paid)) continue;
+
+          const alreadyPaid = Number(row[alreadyPaidIdx]) || 0;
+          if (!alreadyPaidMap.has(empCode)) {
+            alreadyPaidMap.set(empCode, {
+              paid: alreadyPaid,
+              sheets: [sheetName],
+            });
+          } else {
+            const ex = alreadyPaidMap.get(empCode)!;
+            ex.paid += alreadyPaid;
+            ex.sheets.push(sheetName);
+          }
+        }
+      }
+
+      // Sets for statuses
+      const alreadyPaidEmployees = new Set<number>();
+      const unpaidEmployees = new Set<number>();
+      for (const [empId, data] of alreadyPaidMap) {
+        if ((data.paid || 0) > 0) alreadyPaidEmployees.add(empId);
+      }
+      for (const [empId, dueVC] of dueVCMap) {
+        if (dueVC > 0) unpaidEmployees.add(empId);
+      }
+
+      const isCombinedBonusLayout = (headers: any[]) => {
+        const H = headers.map((h) =>
+          String(h ?? "")
+            .trim()
+            .toUpperCase()
+        );
+        return (
+          H.includes("EMP CODE") &&
+          (H.includes("DEPTT.") || H.includes("DEPTT")) &&
+          H.includes("EMP. NAME") &&
+          H.includes("GROSS SAL.") &&
+          H.includes("GROSS 02") &&
+          H.includes("REGISTER") &&
+          H.some((x) => x.startsWith("ACTUAL")) &&
+          H.some((x) => x.replace(/\s+/g, "") === "UNPAID") &&
+          H.includes("ALREADY PAID") &&
+          H.includes("LOAN") &&
+          H.includes("FINAL RTGS")
+        );
+      };
+
+      // HR Final RTGS
+      const hrFinalRTGSData: Map<
+        number,
+        { finalRTGS: number; sheets: string[] }
+      > = new Map();
+      let usedCombinedLayout = false;
+      
+      for (const sheetName of bonusWorkbook.SheetNames) {
+        const sheet = bonusWorkbook.Sheets[sheetName];
+        const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (!rows || rows.length === 0) continue;
+        const headerRow = rows.findIndex(
+          (r) =>
+            Array.isArray(r) &&
+            r.some((v) =>
+              String(v ?? "")
+                .toUpperCase()
+                .includes("EMP CODE")
+            )
+        );
+        if (headerRow === -1) continue;
+
+        const headers = rows[headerRow].map((x) => String(x ?? "").trim());
+        if (!isCombinedBonusLayout(headers)) continue;
+
+        const idx = (label: RegExp) => headers.findIndex((h) => label.test(h));
+        const empCodeIdx = idx(/^EMP\s*CODE$/i);
+        const deptIdx = idx(/^DEPTT\.?$/i);
+        const nameIdx = idx(/^EMP\.?\s*NAME$/i);
+        const pctIdx = idx(/^%$/);
+        const grossIdx = idx(/^GROSS\s*SAL\.?$/i);
+        const gross2Idx = idx(/^GROSS\s*0?2$/i);
+        const registerIdx = idx(/^REGISTER$/i);
+        const actualIdx = idx(/^ACTUAL/i);
+        const reimIdx = idx(/^REIM\.?$/i);
+        const unpaidIdx = idx(/^UN\s*PAID$/i);
+        const alreadyPaidIdx = idx(/^ALREADY\s*PAID$/i);
+        const loanIdx = idx(/^LOAN$/i);
+        const finalRTGSIdx = idx(/^FINAL\s*RTGS/i);
+
+        // DOJ is NOT in combined bonus layout - explicitly set to -1
+        console.log("📋 Combined Layout - DOJ will be fetched from Staff/Worker files (not from bonus sheet)");
+
+        if (
+          [
+            empCodeIdx,
+            deptIdx,
+            nameIdx,
+            grossIdx,
+            registerIdx,
+            finalRTGSIdx,
+          ].some((i) => i === -1)
+        )
+          continue;
+
+        // Reset employeeData and stop Salary1 folding
+        const combinedRows: any[] = [];
+
+        for (let r = headerRow + 1; r < rows.length; r++) {
+          const row = rows[r];
+          if (!row || row.length === 0) continue;
+
+          const empId = Number(row[empCodeIdx]);
+          const deptRaw = String(row[deptIdx] ?? "")
+            .trim()
+            .toUpperCase();
+          const dept =
+            deptRaw === "W" ? "Worker" : deptRaw === "S" ? "Staff" : deptRaw;
+          const name = String(row[nameIdx] ?? "")
+            .trim()
+            .toUpperCase();
+          if (!empId || !name) continue;
+
+          const pct = Number(row[pctIdx]) || 0;
+          const gross = Number(row[grossIdx]) || 0;
+          const gross2 = gross2Idx !== -1 ? Number(row[gross2Idx]) || 0 : gross;
+          const register = Number(row[registerIdx]) || 0;
+          const actual = actualIdx !== -1 ? Number(row[actualIdx]) || 0 : 0;
+          const reim = reimIdx !== -1 ? Number(row[reimIdx]) || 0 : 0;
+          const unpaid = unpaidIdx !== -1 ? Number(row[unpaidIdx]) || 0 : 0;
+          const alreadyPaid =
+            alreadyPaidIdx !== -1 ? Number(row[alreadyPaidIdx]) || 0 : 0;
+          const loan = loanIdx !== -1 ? Number(row[loanIdx]) || 0 : 0;
+          const hrFinal = Number(row[finalRTGSIdx]) || 0;
+
+          // Get DOJ from Staff/Worker data (employeeDOJMap)
+          const dojFromFiles = employeeDOJMap.get(empId);
+          let monthsOfService = 0;
+          if (dojFromFiles) {
+            monthsOfService = calculateMonthsOfService(dojFromFiles);
+            console.log(`🔍 Combined Emp ${empId}: DOJ from files = ${JSON.stringify(dojFromFiles)}, MOS = ${monthsOfService}`);
+          } else {
+            console.warn(`⚠️ Combined Emp ${empId}: No DOJ found in Staff/Worker files`);
+          }
+
+          // Worker rule: keep actual/reim zero if your policy demands; otherwise trust sheet values
+          const actualFinal = dept === "Worker" ? 0 : actual;
+          const reimFinal = dept === "Worker" ? 0 : reim;
+
+          const finalRTGSSoftware = register - unpaid - loan - alreadyPaid;
+          const difference = finalRTGSSoftware - hrFinal;
+          const status =
+            Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
+
+          combinedRows.push({
+            employeeId: empId,
+            employeeName: name,
+            department: dept,
+            monthsOfService,
+            isEligible: dept === "Worker" ? monthsOfService >= 6 : true,
+            percentage: pct,
+            grossSalarySoftware: gross,
+            adjustedGross: gross2,
+            registerSoftware: register,
+            actualCalculated: actualFinal,
+            reimSoftware: reimFinal,
+            unpaidSoftware: unpaid,
+            alreadyPaid,
+            loanDeduction: loan,
+            finalRTGSSoftware,
+            finalRTGSHR: hrFinal,
+            hrSheets: [sheetName],
+            difference,
+            status,
+            paymentStatus:
+              alreadyPaid > 0 ? "Already Paid" : unpaid > 0 ? "Unpaid" : "None",
+          });
+        }
+
+        setComparisonData(
+          combinedRows.sort((a, b) => a.employeeId - b.employeeId)
+        );
+        setFilteredData(
+          combinedRows.sort((a, b) => a.employeeId - b.employeeId)
+        );
+        usedCombinedLayout = true;
+        break;
+      }
+      
+      if (usedCombinedLayout) {
+        setIsProcessing(false);
+        return;
+      }
+
+      // ===== FALLBACK: NON-COMBINED LAYOUT =====
+      // Combine to employee gross (with Oct estimate if applicable)
       const employeeData: Map<
         number,
-        {
-          name: string;
-          dept: string;
-          grossSalary: number;
-          dateOfJoining: any;
-        }
+        { name: string; dept: string; grossSalary: number; dateOfJoining: any }
       > = new Map();
 
       const foldMonthly = (
@@ -1285,23 +1269,10 @@ const bonusFile =
           const hasSep2025 = sepData && sepData.hasValue && sepData.value > 0;
           const isExcluded = EXCLUDE_OCTOBER_EMPLOYEES.has(empId);
 
-          if (isExcluded) {
-            console.log(
-              `🔴 EMP ${empId} ${
-                rec.name
-              } IN EXCLUDE LIST - Base only: ₹${baseSum.toFixed(2)}`
-            );
-          } else if (hasSep2025 && monthsIncluded.length > 0) {
+          if (!isExcluded && hasSep2025 && monthsIncluded.length > 0) {
             const values = monthsIncluded.map((m) => m.value);
             estOct = values.reduce((a, b) => a + b, 0) / values.length;
             total = baseSum + estOct;
-            console.log(
-              `📊 EMP ${empId} ${rec.name}: Avg from ${
-                monthsIncluded.length
-              } months (with values) = ₹${estOct.toFixed(
-                2
-              )}, Total: ₹${total.toFixed(2)}`
-            );
           }
 
           if (!employeeData.has(empId)) {
@@ -1320,33 +1291,27 @@ const bonusFile =
       foldMonthly(staffEmployees);
       foldMonthly(workerEmployees);
 
-      console.log(`\n✅ Employee data loaded: ${employeeData.size} employees`);
-
-      // ========== CALCULATE FINAL RTGS WITH NEW FORMULA ==========
-      console.log("\n🔢 CALCULATING FINAL RTGS WITH NEW FORMULA");
-      console.log("=".repeat(60));
-      console.log(
-        "Formula: Register - Unpaid - Loan - Already Paid = Final RTGS"
-      );
-      console.log("🔴 Reim = 0 for Already Paid or Unpaid employees");
-      console.log("=".repeat(60));
-
+      // CALCULATIONS
       const comparison: any[] = [];
-
       for (const [empId, empData] of employeeData) {
-        const monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
-
-        // 🔥 FIX: Calculate percentage properly (matching Step 8 logic)
-        let percentage: number;
-
-        if (customPercentageMap.has(empId)) {
-          // Use custom percentage from actualPercentageFile
-          percentage = customPercentageMap.get(empId)!;
+        let monthsOfService = 0;
+        if (empData.dateOfJoining) {
           console.log(
-            `✅ Emp ${empId}: Using custom percentage ${percentage}%`
+            `🔍 Final Calc Emp ${empId} (${
+              empData.name
+            }): DOJ = ${JSON.stringify(empData.dateOfJoining)}`
           );
+          monthsOfService = calculateMonthsOfService(empData.dateOfJoining);
+          console.log(`   Final MOS = ${monthsOfService} months`);
         } else {
-          // Calculate based on months of service
+          console.warn(`⚠️ Emp ${empId}: No DOJ found in empData`);
+        }
+
+        // Percentage: custom if provided, else MOS-based fallback
+        let percentage: number;
+        if (customPercentageMap.has(empId)) {
+          percentage = customPercentageMap.get(empId)!;
+        } else {
           if (monthsOfService < 12) {
             percentage = 10.0;
           } else if (monthsOfService >= 12 && monthsOfService < 24) {
@@ -1354,36 +1319,17 @@ const bonusFile =
           } else {
             percentage = 8.33;
           }
-          console.log(
-            `✅ Emp ${empId}: Calculated percentage ${percentage}% (MOS: ${monthsOfService})`
-          );
         }
 
-        // Calculate register based on whether employee is in Per sheet
+        // Register logic: if custom %, use 60% gross, else 8.33% on full gross
         let adjustedGross: number;
         let registerSoftware: number;
-
         if (customPercentageMap.has(empId)) {
-          // Employee in Per sheet: use 60% of gross for register, then apply their percentage
-          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER; // 0.6
+          adjustedGross = empData.grossSalary * SPECIAL_GROSS_MULTIPLIER;
           registerSoftware = (adjustedGross * percentage) / 100;
-
-          console.log(
-            `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | ` +
-              `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
-              `60%=₹${adjustedGross.toFixed(2)} → ` +
-              `Register(${percentage}%)=₹${registerSoftware.toFixed(2)}`
-          );
         } else {
-          // Not in Per sheet: use full gross for register at 8.33%
           adjustedGross = empData.grossSalary;
           registerSoftware = (empData.grossSalary * 8.33) / 100;
-
-          console.log(
-            `🎯 Emp ${empId}: Standard calc - ` +
-              `Gross=₹${empData.grossSalary.toFixed(2)} → ` +
-              `Register(8.33%)=₹${registerSoftware.toFixed(2)}`
-          );
         }
 
         let isEligible = true;
@@ -1397,34 +1343,26 @@ const bonusFile =
         }
 
         const loanDeduction = loanMap.get(empId) || 0;
-
         const alreadyPaidData = alreadyPaidMap.get(empId);
         const alreadyPaid = alreadyPaidData?.paid || 0;
-        const gross2 = calculateGross2(empData.grossSalary, percentage);
 
-        // Set actualCalculated to 0 for Worker department
+        const gross2 = calculateGross2(empData.grossSalary, percentage);
         const actualCalculated =
           empData.dept === "Worker"
             ? 0
             : calculateActual(empData.grossSalary, gross2, percentage);
 
-        // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
-        // 🆕 CALCULATE REIM WITH CONDITIONAL LOGIC
+        // Reim logic
         let reimSoftware: number;
         let paymentStatus = "None";
-
         if (empData.dept === "Worker") {
-          // Set Reim to 0 for all Worker employees
           reimSoftware = 0;
-          console.log(`🔵 Emp ${empId} is WORKER - ReimSoftware set to 0`);
         } else if (alreadyPaidEmployees.has(empId)) {
           reimSoftware = 0;
           paymentStatus = "Already Paid";
-          console.log(`🔴 Emp ${empId} ALREADY PAID - ReimSoftware set to 0`);
         } else if (unpaidEmployees.has(empId)) {
           reimSoftware = 0;
           paymentStatus = "Unpaid";
-          console.log(`🔴 Emp ${empId} UNPAID - ReimSoftware set to 0`);
         } else {
           reimSoftware = registerSoftware - actualCalculated;
         }
@@ -1461,31 +1399,11 @@ const bonusFile =
           status: status,
           paymentStatus: paymentStatus,
         });
-
-        console.log(
-          `💰 Emp ${empId}: Register=${registerSoftware.toFixed(
-            2
-          )} - Unpaid=${unpaidSoftware.toFixed(
-            2
-          )} - Loan=${loanDeduction.toFixed(
-            2
-          )} - AlreadyPaid=${alreadyPaid.toFixed(
-            2
-          )} = Final RTGS (SW)=${finalRTGSSoftware.toFixed(
-            2
-          )}, Final RTGS (HR)=${finalRTGSHR.toFixed(
-            2
-          )}, Reim=${reimSoftware.toFixed(2)}, Status=${paymentStatus}`
-        );
       }
 
       comparison.sort((a, b) => a.employeeId - b.employeeId);
       setComparisonData(comparison);
       setFilteredData(comparison);
-
-      console.log(
-        "\n✅ Final RTGS comparison completed with new formula and Reim logic"
-      );
     } catch (err: any) {
       setError(`Error processing files: ${err.message}`);
       console.error(err);
@@ -1495,11 +1413,11 @@ const bonusFile =
   };
 
   useEffect(() => {
+    // Trigger automatically when mandatory files exist; actualPercentageFile optional
     if (
       staffFile &&
       workerFile &&
       bonusFile &&
-      actualPercentageFile &&
       dueVoucherFile &&
       loanDeductionFile
     ) {
@@ -1510,9 +1428,9 @@ const bonusFile =
     staffFile,
     workerFile,
     bonusFile,
-    actualPercentageFile,
     dueVoucherFile,
     loanDeductionFile,
+    actualPercentageFile,
   ]);
 
   useEffect(() => {
@@ -1649,7 +1567,6 @@ const bonusFile =
 
   const calculateGrandTotals = () => {
     const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
-
     return {
       grossSalarySoftware: sum(
         filteredData.map((r) => Number(r.grossSalarySoftware || 0))
@@ -1692,13 +1609,13 @@ const bonusFile =
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => router.push("/step8")}
+                onClick={() => router.push("step8")}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
               >
                 Back to Step 8
               </button>
               <button
-                onClick={() => router.push("/")}
+                onClick={() => router.push("step1")}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
               >
                 Back to Step 1
@@ -1917,7 +1834,6 @@ const bonusFile =
                       ))}
                     </tbody>
 
-                    {/* Grand Total Row - Sticky at bottom inside table */}
                     {grandTotals && (
                       <tfoot className="sticky bottom-0 z-10">
                         <tr className="bg-gradient-to-r from-indigo-50 to-purple-50 font-bold text-gray-900">

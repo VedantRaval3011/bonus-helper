@@ -1021,6 +1021,12 @@ console.log(`Sheet1: Processed ${processedCount} unique STAFF employees (Workers
               >
                 Back to Step 1
               </button>
+               <button
+                onClick={() => router.push("step5")}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+              >
+                Move to Step 5
+              </button>
             </div>
           </div>
 

@@ -201,7 +201,9 @@ export default function Step6Page() {
         (r) =>
           `${r.employeeId}|${r.department}|${Number(r.unpaidSoftware) || 0}|${
             Number(r.unpaidHR) || 0
-          }|${Number(r.alreadyPaidSoftware) || 0}|${Number(r.alreadyPaidHR) || 0}|${Number(r.difference) || 0}|${r.status}|${r.isEligible}`
+          }|${Number(r.alreadyPaidSoftware) || 0}|${
+            Number(r.alreadyPaidHR) || 0
+          }|${Number(r.difference) || 0}|${r.status}|${r.isEligible}`
       )
       .join(";");
     return djb2Hash(sig);
@@ -244,16 +246,15 @@ export default function Step6Page() {
     pickFile((s) => s.type === "Indiana-Worker") ??
     pickFile((s) => !!s.file && /worker/i.test(s.file.name));
 
-const bonusFile =
-  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-  pickFile(
-    (s) =>
-      !!s.file &&
-      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
-        s.file.name
-      )
-  );
-
+  const bonusFile =
+    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+    pickFile(
+      (s) =>
+        !!s.file &&
+        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+          s.file.name
+        )
+    );
 
   const dueVoucherFile =
     pickFile((s) => s.type === "Due-Voucher-List") ??
@@ -448,7 +449,9 @@ const bonusFile =
   const processFiles = async () => {
     // ✅ Updated: Only require 4 files now (removed actualPercentageFile)
     if (!staffFile || !workerFile || !bonusFile || !dueVoucherFile) {
-      setError("Required files: Indiana Staff, Indiana Worker, Bonus Calculation Sheet, and Due Voucher List");
+      setError(
+        "Required files: Indiana Staff, Indiana Worker, Bonus Calculation Sheet, and Due Voucher List"
+      );
       return;
     }
 
@@ -457,7 +460,9 @@ const bonusFile =
 
     try {
       console.log("=".repeat(60));
-      console.log("📊 STEP 6: Unpaid Verification (Simplified - No Percentage File)");
+      console.log(
+        "📊 STEP 6: Unpaid Verification (Simplified - No Percentage File)"
+      );
       console.log("=".repeat(60));
       console.log(
         `✅ Reference Date: ${
@@ -522,7 +527,9 @@ const bonusFile =
       }
 
       console.log(`✅ Due VC data loaded: ${dueVCMap.size} employees`);
-      console.log(`✅ Already Paid (Software) data loaded: ${alreadyPaidSoftwareMap.size} employees`);
+      console.log(
+        `✅ Already Paid (Software) data loaded: ${alreadyPaidSoftwareMap.size} employees`
+      );
 
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
@@ -539,6 +546,7 @@ const bonusFile =
       > = new Map();
 
       // Process Worker sheet (first sheet)
+      // Process Worker sheet (first sheet) - CORRECTED
       if (bonusWorkbook.SheetNames.length > 0) {
         const workerSheetName = bonusWorkbook.SheetNames[0];
         console.log(`📄 Processing Bonus Worker sheet: ${workerSheetName}`);
@@ -566,52 +574,67 @@ const bonusFile =
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
-          const registerIdx = 19; // Column T
 
-          let dueVCIdx = headers.findIndex((h: any) => {
-            const headerStr = String(h ?? "").trim();
-            return /DUE\s*VC|DUEVC/i.test(headerStr);
+          // Fixed: Look for "Deptt." or "DEPTT" to identify department
+          const deptIdx = headers.findIndex((h: any) => {
+            const normalized = norm(h);
+            return (
+              normalized === "DEPT" ||
+              normalized === "DEPTT" ||
+              normalized === "DEPARTMENT"
+            );
           });
 
-          if (dueVCIdx === -1) {
-            dueVCIdx = 21; // Column V
-          }
-
-          const alreadyPaidIdx = 22; // Column W
+          const registerIdx = 19; // Column T
+          const unpaidIdx = 21; // Column V - "Un Paid"
+          const alreadyPaidIdx = 22; // Column W - "Already Paid"
 
           for (let i = workerHeaderRow + 1; i < workerData.length; i++) {
             const row = workerData[i];
             if (!row || row.length === 0) continue;
 
             const empCode = Number(row[empCodeIdx]);
+
+            // Skip if not valid employee code
+            if (!empCode || isNaN(empCode)) continue;
+
+            // Check department - only process Worker department (W)
+            const dept =
+              deptIdx !== -1
+                ? String(row[deptIdx] || "")
+                    .trim()
+                    .toUpperCase()
+                : "";
+
+            // Only process Worker rows (Deptt = "W")
+            if (dept !== "W") continue;
+
             const registerHR = Number(row[registerIdx]) || 0;
-            const unpaidHR = Number(row[dueVCIdx]) || 0;
+            const unpaidHR = Number(row[unpaidIdx]) || 0;
             const alreadyPaidHR = Number(row[alreadyPaidIdx]) || 0;
 
-            if (empCode && !isNaN(empCode)) {
-              if (hrUnpaidData.has(empCode)) {
-                const existing = hrUnpaidData.get(empCode)!;
-                existing.registerHR += registerHR;
-                existing.unpaidHR += unpaidHR;
-                existing.alreadyPaidHR += alreadyPaidHR;
-                existing.occurrences += 1;
-              } else {
-                hrUnpaidData.set(empCode, {
-                  registerHR: registerHR,
-                  unpaidHR: unpaidHR,
-                  alreadyPaidHR: alreadyPaidHR,
-                  dept: "Worker",
-                  occurrences: 1,
-                });
-              }
+            if (hrUnpaidData.has(empCode)) {
+              const existing = hrUnpaidData.get(empCode)!;
+              existing.registerHR += registerHR;
+              existing.unpaidHR += unpaidHR;
+              existing.alreadyPaidHR += alreadyPaidHR;
+              existing.occurrences += 1;
+            } else {
+              hrUnpaidData.set(empCode, {
+                registerHR: registerHR,
+                unpaidHR: unpaidHR,
+                alreadyPaidHR: alreadyPaidHR,
+                dept: "Worker",
+                occurrences: 1,
+              });
             }
           }
         }
       }
 
-      // Process Staff sheet (second sheet)
-      if (bonusWorkbook.SheetNames.length > 1) {
-        const staffSheetName = bonusWorkbook.SheetNames[1];
+      // Process Staff sheet - CORRECTED (same sheet, filter by Deptt = "S")
+      if (bonusWorkbook.SheetNames.length > 0) {
+        const staffSheetName = bonusWorkbook.SheetNames[0]; // Same sheet!
         console.log(`📄 Processing Bonus Staff sheet: ${staffSheetName}`);
         const staffSheet = bonusWorkbook.Sheets[staffSheetName];
         const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, {
@@ -637,6 +660,17 @@ const bonusFile =
           const empCodeIdx = headers.findIndex((h: any) =>
             ["EMPCODE", "EMPLOYEECODE"].includes(norm(h))
           );
+
+          // Fixed: Look for department column
+          const deptIdx = headers.findIndex((h: any) => {
+            const normalized = norm(h);
+            return (
+              normalized === "DEPT" ||
+              normalized === "DEPTT" ||
+              normalized === "DEPARTMENT"
+            );
+          });
+
           const registerIdx = 19; // Column T
           const unpaidIdx = 21; // Column V
           const alreadyPaidIdx = 22; // Column W
@@ -646,26 +680,38 @@ const bonusFile =
             if (!row || row.length === 0) continue;
 
             const empCode = Number(row[empCodeIdx]);
+
+            if (!empCode || isNaN(empCode)) continue;
+
+            // Check department - only process Staff department (S)
+            const dept =
+              deptIdx !== -1
+                ? String(row[deptIdx] || "")
+                    .trim()
+                    .toUpperCase()
+                : "";
+
+            // Only process Staff rows (Deptt = "S")
+            if (dept !== "S") continue;
+
             const registerHR = Number(row[registerIdx]) || 0;
             const unpaidHR = Number(row[unpaidIdx]) || 0;
             const alreadyPaidHR = Number(row[alreadyPaidIdx]) || 0;
 
-            if (empCode && !isNaN(empCode)) {
-              if (hrUnpaidData.has(empCode)) {
-                const existing = hrUnpaidData.get(empCode)!;
-                existing.registerHR += registerHR;
-                existing.unpaidHR += unpaidHR;
-                existing.alreadyPaidHR += alreadyPaidHR;
-                existing.occurrences += 1;
-              } else {
-                hrUnpaidData.set(empCode, {
-                  registerHR: registerHR,
-                  unpaidHR: unpaidHR,
-                  alreadyPaidHR: alreadyPaidHR,
-                  dept: "Staff",
-                  occurrences: 1,
-                });
-              }
+            if (hrUnpaidData.has(empCode)) {
+              const existing = hrUnpaidData.get(empCode)!;
+              existing.registerHR += registerHR;
+              existing.unpaidHR += unpaidHR;
+              existing.alreadyPaidHR += alreadyPaidHR;
+              existing.occurrences += 1;
+            } else {
+              hrUnpaidData.set(empCode, {
+                registerHR: registerHR,
+                unpaidHR: unpaidHR,
+                alreadyPaidHR: alreadyPaidHR,
+                dept: "Staff",
+                occurrences: 1,
+              });
             }
           }
         }
@@ -870,7 +916,10 @@ const bonusFile =
           );
         });
 
-        const salary1Idx = 8;
+        const salary1Idx = headers.findIndex(
+          (h: any) =>
+            /SALARY-?1/i.test(String(h) ?? "") || norm(h) === "SALARY1"
+        );
 
         let dojIdx = headers.findIndex((h: any) => {
           const headerStr = String(h ?? "").trim();
@@ -1375,7 +1424,9 @@ const bonusFile =
             <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <p className="text-blue-800">Processing unpaid verification...</p>
+                <p className="text-blue-800">
+                  Processing unpaid verification...
+                </p>
               </div>
             </div>
           )}

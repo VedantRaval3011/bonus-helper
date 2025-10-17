@@ -31,15 +31,24 @@ export default function Step8Page() {
     pickFile((s) => s.type === "Indiana-Staff") ??
     pickFile((s) => !!s.file && /staff/i.test(s.file.name));
 
-const bonusFile =
-  pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
-  pickFile(
-    (s) =>
-      !!s.file &&
-      /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
-        s.file.name
-      )
-  );
+  const bonusFile =
+    pickFile((s) => s.type === "Bonus-Calculation-Sheet") ??
+    pickFile(
+      (s) =>
+        !!s.file &&
+        /bonus.*final.*calculation|bonus.*2024-25|sci.*prec.*final.*calculation|final.*calculation.*sheet|nrtm.*final.*bonus.*calculation|nutra.*bonus.*calculation|sci.*prec.*life.*science.*bonus.*calculation/i.test(
+          s.file.name
+        )
+    );
+
+
+  const toNumber = (v: any) => {
+    if (typeof v === "number") return v;
+    if (v == null) return 0;
+    const s = String(v).replace(/[₹,]/g, "").trim();
+    const n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  };
 
   const dueVoucherFile =
     pickFile((s) => s.type === "Due-Voucher-List") ??
@@ -397,6 +406,7 @@ const bonusFile =
     try {
       console.log("=".repeat(60));
       console.log("📊 STEP 8: Reimbursement with Adj. Gross & Payment Status");
+      
       // ========== LOAD DUE VOUCHER LIST ==========
       const dueVoucherMap = new Map<
         number,
@@ -432,44 +442,62 @@ const bonusFile =
 
         if (headerIdx !== -1) {
           const headers = dueVoucherData[headerIdx];
+
+          console.log("\n📋 Due Voucher Headers:");
+          headers.forEach((h: any, idx: number) => {
+            if (h) console.log(`  Col ${idx}: "${h}"`);
+          });
+
           const empCodeIdx = headers.findIndex((h: any) =>
             /EMP.*CODE|EMPCODE/i.test(String(h ?? ""))
           );
           const empNameIdx = headers.findIndex((h: any) =>
-            /EMP.*NAME/i.test(String(h ?? ""))
+            /EMP.*NAME|EMPNAME|EMPLOYEE.*NAME/i.test(String(h ?? ""))
           );
           const deptIdx = headers.findIndex((h: any) =>
-            /DEPT/i.test(String(h ?? ""))
+            /DEPTT|DEPT|DEPARTMENT/i.test(String(h ?? ""))
           );
+
           const dueVCIdx = headers.findIndex((h: any) =>
-            /DUE.*VC/i.test(String(h ?? ""))
+            /DUE.*VC|DUEVC/i.test(String(h ?? ""))
           );
           const alreadyPaidIdx = headers.findIndex((h: any) =>
             /ALREADY.*PAID/i.test(String(h ?? ""))
           );
 
-          console.log(`\n✅ Processing Due Voucher List:`);
-          for (let i = headerIdx + 1; i < dueVoucherData.length; i++) {
-            const row = dueVoucherData[i];
-            if (!row || row.length === 0) continue;
+          console.log(`\n🔍 Due Voucher Column indices:`);
+          console.log(
+            `  EmpCode: ${empCodeIdx}, Name: ${empNameIdx}, Dept: ${deptIdx}`
+          );
+          console.log(`  DueVC: ${dueVCIdx}, AlreadyPaid: ${alreadyPaidIdx}`);
 
-            const empCode = Number(row[empCodeIdx]);
-            if (!empCode || isNaN(empCode)) continue;
+          if (empCodeIdx === -1) {
+            console.log("⚠️ Employee Code column not found in Due Voucher");
+          } else {
+            console.log(`\n✅ Processing Due Voucher List:`);
+            for (let i = headerIdx + 1; i < dueVoucherData.length; i++) {
+              const row = dueVoucherData[i];
+              if (!row || row.length === 0) continue;
 
-            const empName = String(row[empNameIdx] || "").trim();
-            const dept = String(row[deptIdx] || "").trim();
-            const dueVC = Number(row[dueVCIdx]) || 0;
-            const alreadyPaid = Number(row[alreadyPaidIdx]) || 0;
+              const empCode = Number(row[empCodeIdx]);
+              if (!empCode || isNaN(empCode)) continue;
 
-            // Only add employees with Due VC > 0 (these are unpaid)
-            if (dueVC > 0) {
-              dueVoucherMap.set(empCode, {
-                dueVC: dueVC,
-                alreadyPaid: alreadyPaid,
-                name: empName,
-                dept: dept,
-              });
-              console.log(`   Emp ${empCode}: Due VC = ₹${dueVC} → UNPAID`);
+              const empName = String(row[empNameIdx] || "").trim();
+              const dept = String(row[deptIdx] || "").trim();
+
+              const dueVC = dueVCIdx !== -1 ? toNumber(row[dueVCIdx]) : 0;
+              const alreadyPaid =
+                alreadyPaidIdx !== -1 ? toNumber(row[alreadyPaidIdx]) : 0;
+
+              if (dueVC > 0) {
+                dueVoucherMap.set(empCode, {
+                  dueVC: dueVC,
+                  alreadyPaid: alreadyPaid,
+                  name: empName,
+                  dept: dept,
+                });
+                console.log(`   Emp ${empCode}: Due VC = ₹${dueVC} → UNPAID`);
+              }
             }
           }
         }
@@ -486,7 +514,7 @@ const bonusFile =
       // ========== LOAD ACTUAL PERCENTAGE FILE ==========
       const customPercentageMap = new Map<number, number>();
       const zeroOctoberEmployees = new Set<number>();
-      const employeesInPerSheet = new Set<number>(); // NEW: Track employees in Per sheet
+      const employeesInPerSheet = new Set<number>();
 
       if (actualPercentageFile) {
         console.log("\n📋 Loading Actual Percentage Bonus Data...");
@@ -516,7 +544,7 @@ const bonusFile =
               !isNaN(bonusPercentage)
             ) {
               customPercentageMap.set(empCode, bonusPercentage);
-              employeesInPerSheet.add(empCode); // Track this employee
+              employeesInPerSheet.add(empCode);
               console.log(
                 `   Emp ${empCode}: Custom percentage for ACTUAL = ${bonusPercentage}% (will use Adj. Gross for Register)`
               );
@@ -561,7 +589,7 @@ const bonusFile =
         );
       }
 
-      // ========== LOAD BONUS FILE ==========
+      // ========== LOAD BONUS FILE ========== 
       const bonusBuffer = await bonusFile.arrayBuffer();
       const bonusWorkbook = XLSX.read(bonusBuffer);
 
@@ -576,93 +604,140 @@ const bonusFile =
         }
       > = new Map();
 
-      // Process Staff sheet (2nd sheet)
-      if (bonusWorkbook.SheetNames.length > 1) {
-        const staffSheetName = bonusWorkbook.SheetNames[1];
-        const staffSheet = bonusWorkbook.Sheets[staffSheetName];
-        const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, {
-          header: 1,
-        });
+      // FIX: Handle single-sheet files
+      const staffSheetName = bonusWorkbook.SheetNames.length > 1 
+        ? bonusWorkbook.SheetNames[1] 
+        : bonusWorkbook.SheetNames[0];
 
-        console.log(`\n📄 Processing bonus sheet: ${staffSheetName}`);
+      const staffSheet = bonusWorkbook.Sheets[staffSheetName];
+      const staffData: any[][] = XLSX.utils.sheet_to_json(staffSheet, {
+        header: 1,
+      });
 
-        for (let rowIdx = 0; rowIdx < staffData.length; rowIdx++) {
-          const row = staffData[rowIdx];
-          if (!row || row.length === 0) continue;
+      console.log(`\n📄 Processing bonus sheet: ${staffSheetName}`);
 
-          const hasEmpCode = row.some((cell: any) =>
-            /EMP.*CODE|EMPCODE/i.test(String(cell ?? ""))
+      for (let rowIdx = 0; rowIdx < staffData.length; rowIdx++) {
+        const row = staffData[rowIdx];
+        if (!row || row.length === 0) continue;
+
+        const hasEmpCode = row.some((cell: any) =>
+          /EMP.*CODE|EMPCODE/i.test(String(cell ?? ""))
+        );
+
+        if (hasEmpCode) {
+          const headers = row;
+
+          console.log("\n📋 Found headers in bonus sheet:");
+          headers.forEach((h: any, idx: number) => {
+            if (h) console.log(`  Col ${idx}: "${h}"`);
+          });
+
+          const empCodeIdx = headers.findIndex((h: any) =>
+            /EMP.*CODE|EMPCODE/i.test(String(h ?? ""))
           );
+          const deptIdx = headers.findIndex((h: any) =>
+            /DEPTT|DEPT|DEPARTMENT/i.test(String(h ?? ""))
+          );
+          const empNameIdx = headers.findIndex((h: any) =>
+            /EMP.*NAME|EMPNAME|EMPLOYEE.*NAME/i.test(String(h ?? ""))
+          );
+          
+          // FIX: Improved Reim column detection
+          let reimIdx = headers.findIndex((h: any) => {
+            const raw = String(h ?? "").trim().toUpperCase();
+            return /^REIM\.?$|^REIMBURSEMENT$/i.test(raw);
+          });
 
-          if (hasEmpCode) {
-            const headers = row;
-
-            const empCodeIdx = headers.findIndex((h: any) =>
-              /EMP.*CODE|EMPCODE/i.test(String(h ?? ""))
+          // FIX: Better fallback - search for any column containing "REIM"
+          if (reimIdx === -1) {
+            reimIdx = headers.findIndex((h: any) => 
+              /REIM/i.test(String(h ?? ""))
             );
-            const deptIdx = headers.findIndex((h: any) =>
-              /DEPTT|DEPT|DEPARTMENT/i.test(String(h ?? ""))
-            );
-            const empNameIdx = headers.findIndex((h: any) =>
-              /EMP.*NAME|EMPNAME|EMPLOYEE.*NAME/i.test(String(h ?? ""))
-            );
-            const reimIdx = headers.findIndex((h: any) =>
-              /^REIM\.?$/i.test(String(h ?? "").trim())
-            );
-            const unpaidIdx = headers.findIndex((h: any) =>
-              /^UNPAID$/i.test(String(h ?? "").trim())
-            );
-            const alreadyPaidIdx = headers.findIndex((h: any) =>
-              /^ALREADY.*PAID$/i.test(String(h ?? "").trim())
-            );
-
-            if (empCodeIdx === -1 || reimIdx === -1) continue;
-
-            for (let i = rowIdx + 1; i < staffData.length; i++) {
-              const dataRow = staffData[i];
-              if (!dataRow || dataRow.length === 0) continue;
-
-              if (
-                dataRow.some((cell: any) =>
-                  /EMP.*CODE|EMPCODE|^SR.*NO/i.test(String(cell ?? ""))
-                )
-              ) {
-                break;
-              }
-
-              const empCode = Number(dataRow[empCodeIdx]);
-              if (!empCode || isNaN(empCode)) continue;
-
-              const empName = String(dataRow[empNameIdx] || "").trim();
-              const dept = String(dataRow[deptIdx] || "").trim();
-              const reimHR = Number(dataRow[reimIdx]) || 0;
-              const unpaidHR =
-                unpaidIdx !== -1 ? Number(dataRow[unpaidIdx]) || 0 : 0;
-              const alreadyPaidHR =
-                alreadyPaidIdx !== -1
-                  ? Number(dataRow[alreadyPaidIdx]) || 0
-                  : 0;
-
-              if (!hrReimDataMap.has(empCode)) {
-                hrReimDataMap.set(empCode, {
-                  reimHR: reimHR,
-                  unpaidHR: unpaidHR,
-                  alreadyPaidHR: alreadyPaidHR,
-                  name: empName,
-                  dept: dept || "Staff",
-                });
-              } else {
-                const existing = hrReimDataMap.get(empCode)!;
-                existing.reimHR += reimHR;
-                existing.unpaidHR += unpaidHR;
-                existing.alreadyPaidHR += alreadyPaidHR;
-              }
+            if (reimIdx !== -1) {
+              console.log(`⚠️ Using fuzzy match for Reim column at index ${reimIdx}: "${headers[reimIdx]}"`);
             }
           }
+
+          if (reimIdx === -1) {
+            console.error("❌ ERROR: Reim column not found in headers!");
+            console.log("Available headers:", headers.filter(h => h));
+            continue;
+          }
+
+          console.log(`✅ Found Reim column at index: ${reimIdx} ("${headers[reimIdx]}")`);
+
+          const unpaidIdx = headers.findIndex((h: any) =>
+            /^UN\s*PAID$|^UNPAID$/i.test(String(h ?? "").trim())
+          );
+          const alreadyPaidIdx = headers.findIndex((h: any) =>
+            /^ALREADY.*PAID$/i.test(String(h ?? "").trim())
+          );
+
+          console.log(`📍 Column indices: EmpCode=${empCodeIdx}, Dept=${deptIdx}, Name=${empNameIdx}, Reim=${reimIdx}, Unpaid=${unpaidIdx}, AlreadyPaid=${alreadyPaidIdx}`);
+
+          if (empCodeIdx === -1 || reimIdx === -1) {
+            console.error("❌ Missing required columns (EmpCode or Reim)");
+            continue;
+          }
+
+          // FIX: Better row iteration with proper stop conditions
+          for (let i = rowIdx + 1; i < staffData.length; i++) {
+            const dataRow = staffData[i];
+            
+            // FIX: Better empty row detection
+            if (!dataRow || dataRow.length === 0) continue;
+            
+            // FIX: Check ONLY the first cell for stop conditions
+            const firstCell = String(dataRow[0] ?? "").trim();
+            if (!firstCell || firstCell === "" || /^GRAND.*TOTAL$/i.test(firstCell)) {
+              console.log(`⏹️ Stopping at row ${i}: Empty or Total row`);
+              break;
+            }
+
+            const empCode = Number(dataRow[empCodeIdx]);
+            
+            // FIX: Better empCode validation
+            if (!empCode || isNaN(empCode) || empCode <= 0) {
+              console.log(`⚠️ Skipping row ${i}: Invalid empCode = ${empCode}`);
+              continue;
+            }
+
+            const empName = String(dataRow[empNameIdx] || "").trim();
+            const dept = String(dataRow[deptIdx] || "").trim();
+            
+            // FIX: Extract Reim with explicit logging
+            const reimHR = toNumber(dataRow[reimIdx]);
+            const unpaidHR = unpaidIdx !== -1 ? toNumber(dataRow[unpaidIdx]) : 0;
+            const alreadyPaidHR = alreadyPaidIdx !== -1 ? toNumber(dataRow[alreadyPaidIdx]) : 0;
+
+            // FIX: Log EVERY employee being processed
+            console.log(`✓ Row ${i}: Emp ${empCode} (${empName}) - Reim(HR) = ₹${reimHR.toFixed(4)}`);
+
+            // FIX: Store data even if values are 0
+            if (!hrReimDataMap.has(empCode)) {
+              hrReimDataMap.set(empCode, {
+                reimHR: reimHR,
+                unpaidHR: unpaidHR,
+                alreadyPaidHR: alreadyPaidHR,
+                name: empName,
+                dept: dept || "Staff",
+              });
+              
+
+            } else {
+              const existing = hrReimDataMap.get(empCode)!;
+              existing.reimHR += reimHR;
+              existing.unpaidHR += unpaidHR;
+              existing.alreadyPaidHR += alreadyPaidHR;
+            }
+          }
+          
+          // Break after processing the first header row
+          break;
         }
       }
 
-      console.log(`\n✅ Bonus data loaded: ${hrReimDataMap.size} employees`);
+
 
       // ========== LOAD STAFF FILE ==========
       const staffBuffer = await staffFile.arrayBuffer();
@@ -814,6 +889,7 @@ const bonusFile =
       // ========== CALCULATE REIMBURSEMENT ==========
       const comparison: any[] = [];
 
+
       for (const [empId, softwareData] of softwareEmployeesData) {
         const hrData = hrReimDataMap.get(empId);
 
@@ -832,15 +908,14 @@ const bonusFile =
           percentageSource = "Calculated";
         }
 
-        // NEW: Use Adj. Gross for Register if employee is in Per sheet
         let adjustedGrossForRegister: number;
         let registerCalculated: number;
 
         if (employeesInPerSheet.has(empId)) {
-          // Employee in Per sheet: use 60% of gross for register
           adjustedGrossForRegister =
             softwareData.grossSal * SPECIAL_GROSS_MULTIPLIER;
-          registerCalculated = adjustedGrossForRegister * percentageForActual / 100;
+          registerCalculated =
+            (adjustedGrossForRegister * percentageForActual) / 100;
 
           console.log(
             `🎯 Emp ${empId}: In Per sheet - Using Adj. Gross for Register | Gross=₹${softwareData.grossSal.toFixed(
@@ -850,7 +925,6 @@ const bonusFile =
             )} → Register(8.33%)=₹${registerCalculated.toFixed(2)}`
           );
         } else {
-          // Not in Per sheet: use full gross for register
           adjustedGrossForRegister = softwareData.grossSal;
           registerCalculated =
             (softwareData.grossSal * REGISTER_PERCENTAGE) / 100;
@@ -866,20 +940,16 @@ const bonusFile =
           percentageForActual
         );
 
-        // Determine payment status from Due VC
         let paymentStatus = "None";
         const dueVCData = dueVoucherMap.get(empId);
 
         if (dueVCData) {
-          // Employee has Due VC > 0, they are UNPAID
           paymentStatus = "Unpaid";
           console.log(`🔴 Emp ${empId}: UNPAID - Due VC = ₹${dueVCData.dueVC}`);
         } else if (hrData && hrData.alreadyPaidHR > 0) {
-          // Check HR data for Already Paid
           paymentStatus = "Already Paid";
         }
 
-        // Set Reim(Software) to 0 if Unpaid or Already Paid
         let reimSoftware: number;
         if (paymentStatus === "Unpaid") {
           reimSoftware = 0;
@@ -893,7 +963,14 @@ const bonusFile =
           reimSoftware = registerCalculated - actualCalculated;
         }
 
-        const reimHR = hrData?.reimHR || 0;
+        // FIX: Better logging for Reim HR
+        const reimHR = hrData?.reimHR ?? 0;
+        
+        if (!hrData) {
+          console.log(`⚠️ No HR data found for Emp ${empId} (${softwareData.name})`);
+        } else {
+          console.log(`✓ Emp ${empId}: ReimHR from sheet = ₹${reimHR.toFixed(2)}`);
+        }
 
         const difference = reimSoftware - reimHR;
         const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
@@ -915,77 +992,38 @@ const bonusFile =
           paymentStatus: paymentStatus,
           difference: difference,
           status: status,
-          dueVC: dueVCData?.dueVC || 0,
+          dueVC: dueVCData?.dueVC ?? 0,
         });
       }
 
-      // === Merge HR-only Unpaid employees not present in Staff sheets (softwareEmployeesData) ===
+      // Merge HR-only employees
       for (const [hrEmpId, hrRec] of hrReimDataMap) {
-        // Skip if already present from software side
         const alreadyInComparison = comparison.some(
           (r) => r.employeeId === hrEmpId
         );
         if (alreadyInComparison) continue;
 
-        // Only bring in when HR shows Unpaid or Already Paid info; prioritize showing Unpaid
         const isUnpaid = (hrRec.unpaidHR || 0) > 0;
         const isAlreadyPaid = (hrRec.alreadyPaidHR || 0) > 0;
 
         if (!isUnpaid && !isAlreadyPaid) {
-          // No actionable payment status; skip
           continue;
         }
 
         const paymentStatus = isUnpaid ? "Unpaid" : "Already Paid";
-
-        // When Staff sheets lack this employee, software side has no GROSS context.
-        // Populate minimal fields; set Reim(SW)=0 as per rule for Unpaid/Already Paid.
         const registerPercentage = REGISTER_PERCENTAGE;
-        const actualPercentage = isUnpaid ? 0 : 0; // unknown, not used since Reim(SW)=0
+        const actualPercentage = 0;
         const percentageSource = "HR-only";
         const grossSal = 0;
         const adjustedGross = 0;
         const registerCalculated = 0;
         const actualCalculated = 0;
-        const reimSoftware = 0; // CRITICAL: zero for Unpaid/Already Paid in software calculation
+        const reimSoftware = 0;
         const reimHR = hrRec.reimHR || 0;
-
-        // For visibility: department/name from HR where available
         const department = hrRec.dept || "Staff";
         const employeeName = hrRec.name || "";
-
         const difference = reimSoftware - reimHR;
         const status = Math.abs(difference) <= TOLERANCE ? "Match" : "Mismatch";
-
-        // Add employees from Due VC list who aren't in software data
-        for (const [dueEmpId, dueRec] of dueVoucherMap) {
-          const alreadyInComparison = comparison.some(
-            (r) => r.employeeId === dueEmpId
-          );
-          if (alreadyInComparison) continue;
-
-          const hrData = hrReimDataMap.get(dueEmpId);
-
-          comparison.push({
-            employeeId: dueEmpId,
-            employeeName: dueRec.name,
-            department: dueRec.dept,
-            grossSal: 0,
-            adjustedGross: 0,
-            excludedOctober: false,
-            registerPercentage: 0,
-            actualPercentage: 0,
-            percentageSource: "Due VC Only",
-            registerCalculated: 0,
-            actualCalculated: 0,
-            reimSoftware: 0,
-            reimHR: hrData?.reimHR || 0,
-            dueVC: dueRec.dueVC,
-            paymentStatus: "Unpaid",
-            difference: 0 - (hrData?.reimHR || 0),
-            status: "Mismatch",
-          });
-        }
 
         comparison.push({
           employeeId: hrEmpId,
@@ -1004,6 +1042,37 @@ const bonusFile =
           paymentStatus,
           difference,
           status,
+          dueVC: 0,
+        });
+      }
+
+      // Add Due VC only employees
+      for (const [dueEmpId, dueRec] of dueVoucherMap) {
+        const alreadyInComparison = comparison.some(
+          (r) => r.employeeId === dueEmpId
+        );
+        if (alreadyInComparison) continue;
+
+        const hrData = hrReimDataMap.get(dueEmpId);
+
+        comparison.push({
+          employeeId: dueEmpId,
+          employeeName: dueRec.name,
+          department: dueRec.dept,
+          grossSal: 0,
+          adjustedGross: 0,
+          excludedOctober: false,
+          registerPercentage: 0,
+          actualPercentage: 0,
+          percentageSource: "Due VC Only",
+          registerCalculated: 0,
+          actualCalculated: 0,
+          reimSoftware: 0,
+          reimHR: hrData?.reimHR || 0,
+          dueVC: dueRec.dueVC,
+          paymentStatus: "Unpaid",
+          difference: 0 - (hrData?.reimHR || 0),
+          status: "Mismatch",
         });
       }
 
@@ -1028,7 +1097,7 @@ const bonusFile =
     }
   }, [staffFile, bonusFile, actualPercentageFile]);
 
-  // 🎯 Sorting logic
+  // Sorting logic
   useEffect(() => {
     let sorted = [...comparisonData];
 
@@ -1053,7 +1122,6 @@ const bonusFile =
     setFilteredData(sorted);
   }, [comparisonData, sortConfig]);
 
-  // 🎯 Handle column sorting
   const handleSort = (key: string) => {
     let direction: "asc" | "desc" = "asc";
 
@@ -1069,7 +1137,6 @@ const bonusFile =
     setSortConfig({ key, direction });
   };
 
-  // 🎯 Sort icon component
   const SortIcon = ({ columnKey }: { columnKey: string }) => {
     const isActive = sortConfig.key === columnKey;
 
@@ -1136,30 +1203,28 @@ const bonusFile =
     XLSX.writeFile(wb, `Step8-Reimbursement-Calculation.xlsx`);
   };
 
-  // ========== Calculate Grand Totals ==========
-const calculateGrandTotals = () => {
-  const totalReimSoftware = filteredData.reduce(
-    (sum, row) => sum + Number(row.reimSoftware || 0),
-    0
-  );
-  const totalReimHR = filteredData.reduce(
-    (sum, row) => sum + Number(row.reimHR || 0),
-    0
-  );
-  const totalDifference = totalReimSoftware - totalReimHR;
-  
-  // Grand Total Status: Mismatch if |difference| > number of employees
-  const employeeCount = filteredData.length;
-  const grandTotalStatus = Math.abs(totalDifference) > employeeCount ? "Mismatch" : "Match";
+  const calculateGrandTotals = () => {
+    const totalReimSoftware = filteredData.reduce(
+      (sum, row) => sum + Number(row.reimSoftware || 0),
+      0
+    );
+    const totalReimHR = filteredData.reduce(
+      (sum, row) => sum + Number(row.reimHR || 0),
+      0
+    );
+    const totalDifference = totalReimSoftware - totalReimHR;
 
-  return {
-    totalReimSoftware,
-    totalReimHR,
-    totalDifference,
-    grandTotalStatus,
+    const employeeCount = filteredData.length;
+    const grandTotalStatus =
+      Math.abs(totalDifference) > employeeCount ? "Mismatch" : "Match";
+
+    return {
+      totalReimSoftware,
+      totalReimHR,
+      totalDifference,
+      grandTotalStatus,
+    };
   };
-};
-
 
   const grandTotals = calculateGrandTotals();
 
@@ -1686,7 +1751,7 @@ const calculateGrandTotals = () => {
                           </tr>
                         ))}
 
-                        {/* ========== GRAND TOTAL ROW ========== */}
+                        {/* GRAND TOTAL ROW */}
                         <tr className="bg-purple-100 font-bold sticky bottom-0">
                           <td
                             colSpan={6}
@@ -1704,17 +1769,16 @@ const calculateGrandTotals = () => {
                             {formatCurrency(grandTotals.totalDifference)}
                           </td>
                           <td className="border border-gray-300 px-4 py-3 text-center">
-  <span
-    className={`px-3 py-1 rounded-full text-sm font-medium ${
-      grandTotals.grandTotalStatus === "Match"
-        ? "bg-green-200 text-green-900"
-        : "bg-red-200 text-red-900"
-    }`}
-  >
-    {grandTotals.grandTotalStatus}
-  </span>
-</td>
-
+                            <span
+                              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                grandTotals.grandTotalStatus === "Match"
+                                  ? "bg-green-200 text-green-900"
+                                  : "bg-red-200 text-red-900"
+                              }`}
+                            >
+                              {grandTotals.grandTotalStatus}
+                            </span>
+                          </td>
                         </tr>
                       </tbody>
                     </table>
